@@ -84,7 +84,14 @@ mu_bar    = A * mu + B(theta) * u
 Sigma_bar = A * Sigma * A^T + R
 ```
 
-B is state-dependent (cos/sin of theta) to transform from Robot Frame to World Frame. This introduces a linearization — handled properly by the EKF via Jacobian.
+The control input `u = [v_x, omega]` arrives in the **Robot Frame** (forward/turn). To predict the next position in the **World Frame**, the velocity must be rotated by the current heading angle theta:
+
+```
+dx = v_x * cos(theta) * dt
+dy = v_x * sin(theta) * dt
+```
+
+This means B contains `cos(theta)` and `sin(theta)`, which depend on the current state. Strictly speaking, this makes the motion model nonlinear — the standard KF assumes B is constant. As a pragmatic approximation, B is recomputed at each step using the latest theta estimate. The lecturer confirmed this approach is acceptable for the KF. The EKF addresses this properly by computing the Jacobian of the motion model.
 
 **Correction (Lines 4–6):**
 
