@@ -109,13 +109,45 @@ Measurement matrix `C = Identity` since `z = [x, y, theta]` maps directly to the
 
 ---
 
-## Status
+## Status & ToDo
 
-| Filter | Prediction | Correction | Visualized |
+### Implementation
+
+| | KF | EKF | PF |
 |---|---|---|---|
-| KF  | ✅ | ✅ | ✅ |
-| EKF | 🔲 | 🔲 | 🔲 |
-| PF  | 🔲 | 🔲 | 🔲 |
+| Prediction step | ✅ | 🔲 | 🔲 |
+| Correction step | ✅ | 🔲 | 🔲 |
+| Publish `/pose_*` | ✅ | 🔲 | 🔲 |
+| Visualized in RViz | ✅ | 🔲 | 🔲 |
+
+### Mandatory Experiments (all three filters)
+
+| Experiment | Status |
+|---|---|
+| Process Noise (R) variation — analyze model confidence | 🔲 |
+| Measurement Noise (Q) variation — analyze sensor trust | 🔲 |
+| Ground Truth Evaluation — RMSE vs `/odom` trajectory | 🔲 |
+| Runtime / Performance comparison KF vs EKF vs PF | 🔲 |
+| Landmark detection — self-defined landmark | 🔲 |
+
+### Special Task (2510331009)
+
+| Task | Status |
+|---|---|
+| Implement PF baseline with standard resampling | 🔲 |
+| Disable resampling — observe particle degeneration | 🔲 |
+| Reduce resampling frequency — analyze N_eff over time | 🔲 |
+| Resampling only when N_eff < threshold | 🔲 |
+| Plot weight distribution / effective sample size | 🔲 |
+| Compare RMSE: full resampling vs reduced vs none | 🔲 |
+
+### Submission
+
+| | Status |
+|---|---|
+| GitHub repo with README | ✅ |
+| Paper (documentation) | 🔲 |
+| PowerPoint presentation | 🔲 |
 
 ---
 
