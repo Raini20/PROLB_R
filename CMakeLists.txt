@@ -51,5 +51,7 @@ install(TARGETS kf_node ekf_node
 
 install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch)
+install(DIRECTORY rviz/
+  DESTINATION share/${PROJECT_NAME}/rviz)
 
 ament_package()

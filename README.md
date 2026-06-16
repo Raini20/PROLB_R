@@ -50,7 +50,8 @@ source install/setup.bash
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-ros2 launch nav2_bringup tb3_simulation_launch.py headless:=False
+ros2 launch nav2_bringup tb3_simulation_launch.py headless:=False \
+  rviz_config:=$HOME/prob_ros_ws/src/probabilistic_robot_lab/rviz/filters.rviz
 ```
 
 **In RViz** (do this in order):
@@ -61,6 +62,8 @@ ros2 launch nav2_bringup tb3_simulation_launch.py headless:=False
 ### Terminal 2 — Filter nodes
 
 ```bash
+source /opt/ros/jazzy/setup.bash
+source ~/prob_ros_ws/install/setup.bash
 ros2 launch probabilistic_robot_lab filters.launch.py
 ```
 
