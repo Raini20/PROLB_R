@@ -1,0 +1,29 @@
+# Windows metadata (WSL2 file transfers)
+*:Zone.Identifier
+
+# ROS2 build artifacts
+build/
+install/
+log/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# C++ build output
+*.o
+*.so
+*.a
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
