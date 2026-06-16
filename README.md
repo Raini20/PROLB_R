@@ -1,9 +1,9 @@
 # Probabilistic Robot Lab (PROLB_R)
 
-ROS2 implementation of **Kalman Filter (KF)**, **Extended Kalman Filter (EKF)**, and **Particle Filter (PF)** for mobile robot localization, applied to a TurtleBot3 simulation with Nav2.
+ROS2 implementation of **Kalman Filter (KF)**, **Extended Kalman Filter (EKF)**, and **Particle Filter (PF)** for mobile robot localization on a TurtleBot3 simulation.
 
 **Course:** Probabilistic Robotics (PRO), FH Technikum Wien  
-**Special Task (2510331009):** Disable or modify resampling in the PF and analyze particle degeneration.
+**Special Task (2510331009):** Disable/modify resampling in the PF and analyze particle degeneration.
 
 ---
 
@@ -13,103 +13,82 @@ ROS2 implementation of **Kalman Filter (KF)**, **Extended Kalman Filter (EKF)**,
 |---|---|
 | OS | Ubuntu 24.04 (WSL2) |
 | ROS2 | Jazzy |
-| Simulation | TurtleBot3 + Nav2 (Gazebo Modern) |
+| Simulation | TurtleBot3 Waffle + Nav2 (Gazebo) |
 | Language | C++ (rclcpp, Eigen3) |
+
+---
+
+## Prerequisites
+
+Install TurtleBot3 and Nav2 if not already done:
+
+```bash
+sudo apt install ros-jazzy-turtlebot3* ros-jazzy-nav2-bringup libeigen3-dev
+echo "export TURTLEBOT3_MODEL=waffle" >> ~/.bashrc && source ~/.bashrc
+```
 
 ---
 
 ## Setup
 
 ```bash
-# 1. Clone into ROS2 workspace
 mkdir -p ~/prob_ros_ws/src && cd ~/prob_ros_ws/src
 git clone git@github.com:Raini20/PROLB_R.git probabilistic_robot_lab
-
-# 2. Build
 cd ~/prob_ros_ws
 source /opt/ros/jazzy/setup.bash
 colcon build
 source install/setup.bash
 ```
 
+> **Tip:** Add `source ~/prob_ros_ws/install/setup.bash` to `~/.bashrc` so you don't need to source manually each time.
+
 ---
 
-## Running the Simulation
+## Running
+
+### Terminal 1 — Simulation
 
 ```bash
-# Terminal 1 — Start TB3 simulation with Nav2
 source /opt/ros/jazzy/setup.bash
 ros2 launch nav2_bringup tb3_simulation_launch.py headless:=False
 ```
 
-In RViz:
-1. Set **2D Pose Estimate** to initialize AMCL
-2. Wait for Nav2 to become active (~30s)
-3. Set a **Nav2 Goal** to drive the robot
+**In RViz** (do this in order):
+1. Click **2D Pose Estimate** and place the robot on the map
+2. Wait ~30 s for Nav2 to become active (particle cloud appears)
+3. Click **Nav2 Goal** to drive the robot
+
+### Terminal 2 — Filter nodes
 
 ```bash
-# Terminal 2 — Run KF node
-source /opt/ros/jazzy/setup.bash
-source ~/prob_ros_ws/install/setup.bash
-ros2 run probabilistic_robot_lab kf_node
+ros2 launch probabilistic_robot_lab filters.launch.py
+```
+
+This starts the **KF node** by default. Once EKF and PF are implemented:
+
+```bash
+ros2 launch probabilistic_robot_lab filters.launch.py ekf:=true pf:=true
 ```
 
 ---
 
 ## Nodes
 
-### `kf_node` — Kalman Filter
+| Node | Executable | Subscribes | Publishes |
+|---|---|---|---|
+| Kalman Filter | `kf_node` | `/cmd_vel`, `/odom` | `/pose_kf` |
+| Extended KF | `ekf_node` | `/cmd_vel`, `/odom` | `/pose_ekf` |
+| Particle Filter | `pf_node` | `/cmd_vel`, `/odom` | `/pose_pf` |
 
-Implements the linear Kalman Filter (Thrun 2006, Table 3.1).
+State vector for all filters: `[x, y, θ]`
 
-**Subscriptions:**
-
-| Topic | Type | Role |
-|---|---|---|
-| `/cmd_vel` | `geometry_msgs/Twist` | Control input u_t |
-| `/odom` | `nav_msgs/Odometry` | Measurement z_t |
-
-**Publications:**
-
-| Topic | Type |
-|---|---|
-| `/pose_kf` | `geometry_msgs/PoseWithCovarianceStamped` |
-
-**State vector:** `mu = [x, y, theta]`
-
-**Prediction (Lines 2–3):**
-
-```
-mu_bar    = A * mu + B(theta) * u
-Sigma_bar = A * Sigma * A^T + R
-```
-
-The control input `u = [v_x, omega]` arrives in the **Robot Frame** (forward/turn). To predict the next position in the **World Frame**, the velocity must be rotated by the current heading angle theta:
-
-```
-dx = v_x * cos(theta) * dt
-dy = v_x * sin(theta) * dt
-```
-
-This means B contains `cos(theta)` and `sin(theta)`, which depend on the current state. Strictly speaking, this makes the motion model nonlinear — the standard KF assumes B is constant. As a pragmatic approximation, B is recomputed at each step using the latest theta estimate. The lecturer confirmed this approach is acceptable for the KF. The EKF addresses this properly by computing the Jacobian of the motion model.
-
-**Correction (Lines 4–6):**
-
-```
-K     = Sigma_bar * C^T * (C * Sigma_bar * C^T + Q)^{-1}
-mu    = mu_bar + K * (z - C * mu_bar)
-Sigma = (I - K * C) * Sigma_bar
-```
-
-Measurement matrix `C = Identity` since `z = [x, y, theta]` maps directly to the state.
-
-**Notation (Thrun):**
+Notation follows Thrun (2006):
 - `R` = process noise covariance
 - `Q` = measurement noise covariance
 
 ---
 
-## Status & ToDo
+## Status
 
 ### Implementation
 
@@ -118,34 +97,34 @@ Measurement matrix `C = Identity` since `z = [x, y, theta]` maps directly to the
 | Prediction step | ✅ | 🔲 | 🔲 |
 | Correction step | ✅ | 🔲 | 🔲 |
 | Publish `/pose_*` | ✅ | 🔲 | 🔲 |
-| Visualized in RViz | ✅ | 🔲 | 🔲 |
+| RViz visualization | ✅ | 🔲 | 🔲 |
 
-### Mandatory Experiments (all three filters)
+### Experiments
 
 | Experiment | Status |
 |---|---|
-| Process Noise (R) variation — analyze model confidence | 🔲 |
-| Measurement Noise (Q) variation — analyze sensor trust | 🔲 |
-| Ground Truth Evaluation — RMSE vs `/odom` trajectory | 🔲 |
-| Runtime / Performance comparison KF vs EKF vs PF | 🔲 |
-| Landmark detection — self-defined landmark | 🔲 |
+| Process noise (R) variation | 🔲 |
+| Measurement noise (Q) variation | 🔲 |
+| Ground truth evaluation (RMSE vs `/odom`) | 🔲 |
+| Runtime comparison KF / EKF / PF | 🔲 |
+| Landmark detection | 🔲 |
 
 ### Special Task (2510331009)
 
 | Task | Status |
 |---|---|
-| Implement PF baseline with standard resampling | 🔲 |
-| Disable resampling — observe particle degeneration | 🔲 |
-| Reduce resampling frequency — analyze N_eff over time | 🔲 |
-| Resampling only when N_eff < threshold | 🔲 |
-| Plot weight distribution / effective sample size | 🔲 |
-| Compare RMSE: full resampling vs reduced vs none | 🔲 |
+| PF baseline with standard resampling | 🔲 |
+| Disabled resampling — particle degeneration | 🔲 |
+| Reduced resampling frequency — N_eff over time | 🔲 |
+| Adaptive resampling (N_eff < threshold) | 🔲 |
+| Weight distribution / N_eff plots | 🔲 |
+| RMSE comparison: full / reduced / no resampling | 🔲 |
 
 ### Submission
 
 | | Status |
 |---|---|
-| GitHub repo with README | ✅ |
+| GitHub repo + README | ✅ |
 | Paper (documentation) | 🔲 |
 | PowerPoint presentation | 🔲 |
 
