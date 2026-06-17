@@ -36,6 +36,7 @@ def generate_launch_description():
             executable='kf_node',
             name='kf_node',
             output='screen',
+            parameters=[{'use_sim_time': True}],
             condition=IfCondition(LaunchConfiguration('kf')),
         ),
 
@@ -47,6 +48,7 @@ def generate_launch_description():
             executable='ekf_node',
             name='ekf_node',
             output='screen',
+            parameters=[{'use_sim_time': True}],
             condition=IfCondition(LaunchConfiguration('ekf')),
         ),
 
