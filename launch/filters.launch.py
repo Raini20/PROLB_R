@@ -1,7 +1,8 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.substitutions import FindPackageShare
 from launch_ros.actions import Node
 
 
@@ -58,5 +59,17 @@ def generate_launch_description():
             name='pf_node',
             output='screen',
             condition=IfCondition(LaunchConfiguration('pf')),
+        ),
+
+        # RViz with our config
+        Node(
+            package='rviz2',
+            executable='rviz2',
+            name='rviz2',
+            arguments=['-d', PathJoinSubstitution([
+                FindPackageShare('probabilistic_robot_lab'),
+                'rviz', 'filters.rviz'
+            ])],
+            output='screen',
         ),
     ])
