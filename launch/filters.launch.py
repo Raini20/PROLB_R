@@ -21,7 +21,7 @@ def generate_launch_description():
             'kf', default_value='true',
             description='Launch Kalman Filter node'),
         DeclareLaunchArgument(
-            'ekf', default_value='false',
+            'ekf', default_value='true',
             description='Launch Extended Kalman Filter node'),
         DeclareLaunchArgument(
             'pf', default_value='false',
