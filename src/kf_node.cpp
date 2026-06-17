@@ -2,60 +2,72 @@
 #include "geometry_msgs/msg/twist.hpp"
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
+#include "sensor_msgs/msg/laser_scan.hpp"
+#include "probabilistic_robot_lab/landmark_map.hpp"
 #include <Eigen/Dense>
 #include <cmath>
+#include <vector>
 #include "rclcpp/time.hpp"
 #include "builtin_interfaces/msg/time.hpp"
 
 /*
- * Kalman Filter Node
+ * Kalman Filter Node — Odometry + Landmark Correction
+ * =====================================================
  * State:         mu = [x, y, theta]^T
- * Control input: u  = [v_x, omega]^T  (from /cmd_vel, Robot Frame)
- * Measurement:   z  = [x, y, theta]^T (from /odom, World Frame)
+ * Control input: u  = [v, omega]^T     (from /cmd_vel, robot frame)
  *
- * Algorithm Kalman_filter(mu_{t-1}, Sigma_{t-1}, u_t, z_t)
- * ref: Thrun (2006), Probabilistic Robotics, Table 3.1
+ * Prediction  (Thrun Table 3.1, Lines 2–3)
+ *   mu_bar    = A * mu + B(theta) * u    — B contains cos/sin of theta
+ *   Sigma_bar = A * Sigma * A^T + R
+ *   NOTE: B is state-dependent — this is an approximation (linearisation).
+ *         The EKF eliminates this error via the Jacobian G and nonlinear g().
  *
- * NOTE: B_t is state-dependent because u_t is in Robot Frame.
- *       Transformation to World Frame requires cos(theta)/sin(theta).
- *       This is a linearization — the EKF handles this properly via Jacobian.
+ * Correction 1 — Odometry  (Lines 4–6)
+ *   z = [x, y, theta],  C = I_3          — always applied when available
  *
- * Thrun notation:
- *   R_t = process noise covariance  (prediction, Line 3)
- *   Q_t = measurement noise covariance (correction, Line 4)
- *   C_t = measurement matrix = Identity (z maps directly to state)
+ * Correction 2 — Landmarks  (one sequential update per detected landmark)
+ *   z_lm  = r_measured                   — scalar range from /scan
+ *   C_lm  = dh/dmu |_{mu_}              — linearised 1×3 Jacobian of range
+ *   Treated in KF as a locally-fixed linear measurement matrix.
+ *   The EKF applies the same Jacobian formula — the difference is that
+ *   the EKF prediction step is already exact (g, G), so the overall
+ *   linearisation error is smaller.
+ *
+ * ref: Thrun (2006) Table 3.1 (KF) + Table 7.2 (EKF localisation, adapted)
  */
+
+// One detected landmark for the current scan cycle
+struct LandmarkObs {
+    double mx, my;   // world-frame position of the landmark
+    double range;    // scan range reading at the expected bearing [m]
+};
+
+static inline double wrapAngle(double a)
+{
+    while (a >  M_PI) a -= 2.0 * M_PI;
+    while (a < -M_PI) a += 2.0 * M_PI;
+    return a;
+}
 
 class KalmanFilterNode : public rclcpp::Node
 {
 public:
     KalmanFilterNode() : Node("kf_node"), odom_received_(false)
     {
-        // --- Initial State ---
-        // mu_{t-1}: initial state [x, y, theta]
-        mu_ = Eigen::Vector3d::Zero();
-
-        // Sigma_{t-1}: initial covariance
+        // Initial state
+        mu_    = Eigen::Vector3d::Zero();
         Sigma_ = Eigen::Matrix3d::Identity() * 0.1;
 
-        // --- System Matrices ---
-        // A_t: state transition (identity — no velocity in state vector)
-        // Line 2: mu_bar = A * mu_{t-1} + B * u_t
-        A_ = Eigen::Matrix3d::Identity();
+        // System matrices (Thrun notation)
+        A_ = Eigen::Matrix3d::Identity();          // state transition
+        R_ = Eigen::Matrix3d::Identity() * 0.01;   // process noise
+        C_ = Eigen::Matrix3d::Identity();          // odometry measurement matrix
+        Q_ = Eigen::Matrix3d::Identity() * 0.1;    // odometry measurement noise
 
-        // R_t: process noise covariance (Thrun notation, Line 3)
-        // Line 3: Sigma_bar = A * Sigma_{t-1} * A^T + R_t
-        R_ = Eigen::Matrix3d::Identity() * 0.01;
+        // Landmark range noise variance  (Q_lm = sigma_r^2)
+        q_lm_ = LM_SIGMA_R * LM_SIGMA_R;
 
-        // C_t: measurement matrix — maps state to measurement space
-        // z = [x, y, theta] = C * mu  =>  C = Identity
-        // Line 4: K_t = Sigma_bar * C^T * (C * Sigma_bar * C^T + Q_t)^{-1}
-        C_ = Eigen::Matrix3d::Identity();
-
-        // Q_t: measurement noise covariance (Thrun notation, Line 4)
-        Q_ = Eigen::Matrix3d::Identity() * 0.1;
-
-        // --- Subscribers ---
+        // Subscribers
         cmd_vel_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
             "/cmd_vel", 10,
             std::bind(&KalmanFilterNode::cmdVelCallback, this, std::placeholders::_1));
@@ -64,129 +76,210 @@ public:
             "/odom", 10,
             std::bind(&KalmanFilterNode::odomCallback, this, std::placeholders::_1));
 
-        // --- Publisher ---
+        scan_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
+            "/scan", 10,
+            std::bind(&KalmanFilterNode::scanCallback, this, std::placeholders::_1));
+
+        // Publisher
         pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
             "/pose_kf", 10);
 
         last_time_ = this->get_clock()->now();
-        RCLCPP_INFO(this->get_logger(), "KF Node started");
+        RCLCPP_INFO(this->get_logger(), "KF Node started (odom + landmark correction)");
     }
 
 private:
-    // Cache latest odom measurement
+    // ------------------------------------------------------------------
+    // Cache latest odometry measurement
+    // ------------------------------------------------------------------
     void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
-        // Extract z_t = [x, y, theta] from odometry
         z_(0) = msg->pose.pose.position.x;
         z_(1) = msg->pose.pose.position.y;
-
-        // Convert quaternion to theta (rotation around z-axis)
-        // theta = 2 * atan2(q.z, q.w)
         double qz = msg->pose.pose.orientation.z;
         double qw = msg->pose.pose.orientation.w;
         z_(2) = 2.0 * std::atan2(qz, qw);
-
         odom_received_ = true;
     }
 
+    // ------------------------------------------------------------------
+    // Detect landmarks from the latest LaserScan
+    // ------------------------------------------------------------------
+    void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
+    {
+        detected_.clear();
+
+        for (const auto& lm : LANDMARK_MAP)
+        {
+            // Vector from robot to landmark in world frame
+            double dx    = lm.x - mu_(0);
+            double dy    = lm.y - mu_(1);
+            double r_exp = std::sqrt(dx*dx + dy*dy);
+
+            // Skip if landmark is outside sensor range
+            if (r_exp < msg->range_min + 0.05 || r_exp > msg->range_max - 0.05)
+                continue;
+
+            // Expected bearing to landmark in robot frame
+            double bearing = wrapAngle(std::atan2(dy, dx) - mu_(2));
+            if (bearing < msg->angle_min || bearing > msg->angle_max)
+                continue;
+
+            // Index of the scan beam closest to the expected bearing
+            int idx = static_cast<int>(
+                std::round((bearing - msg->angle_min) / msg->angle_increment));
+            if (idx < 0 || idx >= static_cast<int>(msg->ranges.size())) continue;
+
+            float r_meas = msg->ranges[idx];
+            if (!std::isfinite(r_meas)) continue;
+            if (r_meas < msg->range_min || r_meas > msg->range_max) continue;
+
+            // Gating: only accept if measured range is close to expected
+            if (std::abs(r_meas - r_exp) > LM_GATE_M) continue;
+
+            detected_.push_back({lm.x, lm.y, static_cast<double>(r_meas)});
+            RCLCPP_DEBUG(this->get_logger(),
+                "KF: detected %s  r_exp=%.3f  r_meas=%.3f",
+                lm.name, r_exp, static_cast<double>(r_meas));
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Main filter step — triggered by every /cmd_vel message
+    // ------------------------------------------------------------------
     void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
     {
         auto now = this->get_clock()->now();
         double dt = (now - last_time_).seconds();
         last_time_ = now;
+        if (dt <= 0.0 || dt > 1.0) return;
 
-        if (dt <= 0.0 || dt > 1.0) return;  // skip bad dt
-
-        // u_t = [v_x, omega]^T from /cmd_vel (Robot Frame)
-        double vx    = msg->linear.x;
+        double v     = msg->linear.x;
         double omega = msg->angular.z;
-        Eigen::Vector2d u(vx, omega);
-
-        // B_t: control input matrix (3x2), state-dependent via theta
-        // Transforms u_t from Robot Frame to World Frame
         double theta = mu_(2);
+
+        // ---------------------------------------------------------------
+        // PREDICTION  (Thrun Table 3.1, Lines 2–3)
+        // ---------------------------------------------------------------
+
+        // B_t (3×2): maps u = [v, omega] from robot frame to world frame.
+        // cos/sin make B state-dependent — a linearisation the EKF avoids.
         Eigen::Matrix<double, 3, 2> B;
-        B << std::cos(theta) * dt,  0.0,
-             std::sin(theta) * dt,  0.0,
-             0.0,                   dt;
+        B << std::cos(theta)*dt, 0.0,
+             std::sin(theta)*dt, 0.0,
+             0.0,                dt;
 
-        // -------------------------------------------------------
-        // PREDICTION STEP
-        // -------------------------------------------------------
-        // Line 2 (Thrun): mu_bar_t = A_t * mu_{t-1} + B_t * u_t
-        Eigen::Vector3d mu_bar = A_ * mu_ + B * u;
-
-        // Line 3 (Thrun): Sigma_bar_t = A_t * Sigma_{t-1} * A_t^T + R_t
+        Eigen::Vector3d mu_bar    = A_ * mu_ + B * Eigen::Vector2d(v, omega);
         Eigen::Matrix3d Sigma_bar = A_ * Sigma_ * A_.transpose() + R_;
 
-        // -------------------------------------------------------
-        // CORRECTION STEP  (only if we have a measurement)
-        // -------------------------------------------------------
+        // ---------------------------------------------------------------
+        // CORRECTION 1: Odometry  (Lines 4–6)
+        // ---------------------------------------------------------------
         if (odom_received_)
         {
-            // Line 4 (Thrun): K_t = Sigma_bar * C^T * (C * Sigma_bar * C^T + Q_t)^{-1}
             Eigen::Matrix3d S = C_ * Sigma_bar * C_.transpose() + Q_;
             Eigen::Matrix3d K = Sigma_bar * C_.transpose() * S.inverse();
 
-            // Line 5 (Thrun): mu_t = mu_bar + K_t * (z_t - C_t * mu_bar)
-            Eigen::Vector3d innovation = z_ - C_ * mu_bar;
+            Eigen::Vector3d innov = z_ - C_ * mu_bar;
+            innov(2) = wrapAngle(innov(2));
 
-            // Wrap theta innovation to [-pi, pi]
-            while (innovation(2) >  M_PI) innovation(2) -= 2.0 * M_PI;
-            while (innovation(2) < -M_PI) innovation(2) += 2.0 * M_PI;
-
-            mu_ = mu_bar + K * innovation;
-
-            // Line 6 (Thrun): Sigma_t = (I - K_t * C_t) * Sigma_bar
+            mu_    = mu_bar + K * innov;
             Sigma_ = (Eigen::Matrix3d::Identity() - K * C_) * Sigma_bar;
         }
         else
         {
-            // No measurement yet — prediction only
             mu_    = mu_bar;
             Sigma_ = Sigma_bar;
+        }
+
+        // ---------------------------------------------------------------
+        // CORRECTION 2: Landmarks  (sequential 1-D range updates)
+        // ---------------------------------------------------------------
+        //
+        // Measurement function:  h(mu, m_j) = || m_j - [x, y] ||
+        //
+        // C_lm (1×3) is the linearised Jacobian of h w.r.t. mu,
+        // evaluated at the current estimate mu_.  The KF treats this as
+        // a locally-fixed linear matrix — valid while the linearisation
+        // point stays close to the true pose.  If the filter drifts, the
+        // approximation error grows (a limitation the EKF's exact
+        // prediction step partially mitigates).
+        //
+        // Each landmark yields an independent scalar measurement and is
+        // fused sequentially.
+        for (const auto& obs : detected_)
+        {
+            double dx = obs.mx - mu_(0);
+            double dy = obs.my - mu_(1);
+            double r2 = dx*dx + dy*dy;
+            double r  = std::sqrt(r2);
+            if (r < 1e-4) continue;
+
+            // Linearised measurement matrix C_lm (1×3):
+            //   dh/dx     = -dx / r
+            //   dh/dy     = -dy / r
+            //   dh/dtheta =  0   (range does not depend on heading)
+            Eigen::Matrix<double,1,3> C_lm;
+            C_lm << -dx/r, -dy/r, 0.0;
+
+            // Innovation: measured range minus expected range (scalar)
+            double innov = obs.range - r;
+
+            // Kalman gain (3×1)
+            double          S_lm = (C_lm * Sigma_ * C_lm.transpose())(0,0) + q_lm_;
+            Eigen::Vector3d K_lm = Sigma_ * C_lm.transpose() / S_lm;
+
+            // State and covariance update
+            mu_    += K_lm * innov;
+            mu_(2)  = wrapAngle(mu_(2));
+            Sigma_  = (Eigen::Matrix3d::Identity() - K_lm * C_lm) * Sigma_;
         }
 
         publishPose();
     }
 
+    // ------------------------------------------------------------------
     void publishPose()
     {
         auto msg = geometry_msgs::msg::PoseWithCovarianceStamped();
         auto now = this->get_clock()->now();
-        msg.header.stamp.sec     = (int32_t)(now.nanoseconds() / 1000000000LL);
-        msg.header.stamp.nanosec = (uint32_t)(now.nanoseconds() % 1000000000LL);
+        msg.header.stamp.sec     = static_cast<int32_t>(now.nanoseconds() / 1000000000LL);
+        msg.header.stamp.nanosec = static_cast<uint32_t>(now.nanoseconds() % 1000000000LL);
         msg.header.frame_id = "map";
 
-        msg.pose.pose.position.x = mu_(0);
-        msg.pose.pose.position.y = mu_(1);
-        msg.pose.pose.orientation.z = std::sin(mu_(2) / 2.0);
-        msg.pose.pose.orientation.w = std::cos(mu_(2) / 2.0);
+        msg.pose.pose.position.x        = mu_(0);
+        msg.pose.pose.position.y        = mu_(1);
+        msg.pose.pose.orientation.z     = std::sin(mu_(2) / 2.0);
+        msg.pose.pose.orientation.w     = std::cos(mu_(2) / 2.0);
 
-        // Covariance (6x6 row-major: x,y,z,rx,ry,rz)
-        // We track x,y,theta → indices [0,0], [1,1], [5,5]
-        msg.pose.covariance[0]  = Sigma_(0, 0);  // x variance
-        msg.pose.covariance[7]  = Sigma_(1, 1);  // y variance
-        msg.pose.covariance[35] = Sigma_(2, 2);  // theta variance
+        // Covariance (6×6 row-major): x→[0,0], y→[1,1], theta→[5,5]
+        msg.pose.covariance[0]  = Sigma_(0,0);
+        msg.pose.covariance[7]  = Sigma_(1,1);
+        msg.pose.covariance[35] = Sigma_(2,2);
 
         pub_->publish(msg);
     }
 
     // State
-    Eigen::Vector3d mu_;       // [x, y, theta]
-    Eigen::Matrix3d Sigma_;    // Covariance
-    Eigen::Vector3d z_;        // Latest measurement from /odom
-    bool odom_received_;
+    Eigen::Vector3d mu_;
+    Eigen::Matrix3d Sigma_;
+    Eigen::Vector3d z_;          // latest odometry measurement
+    bool            odom_received_;
 
-    // System matrices (Thrun notation)
-    Eigen::Matrix3d A_;   // State transition
-    Eigen::Matrix3d R_;   // Process noise covariance
-    Eigen::Matrix3d C_;   // Measurement matrix
-    Eigen::Matrix3d Q_;   // Measurement noise covariance
+    // Matrices (Thrun notation)
+    Eigen::Matrix3d A_;   // state transition
+    Eigen::Matrix3d R_;   // process noise covariance
+    Eigen::Matrix3d C_;   // odometry measurement matrix
+    Eigen::Matrix3d Q_;   // odometry measurement noise covariance
+    double          q_lm_;  // landmark range noise variance (scalar)
+
+    // Landmark detections from the latest scan cycle
+    std::vector<LandmarkObs> detected_;
 
     rclcpp::Time last_time_;
-    rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
-    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr     cmd_vel_sub_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr       odom_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr   scan_sub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pub_;
 };
 
