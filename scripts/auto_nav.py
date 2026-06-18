@@ -35,10 +35,10 @@ INITIAL_POSE = (0.0, 0.0, 0.0)
 # Nav2 plans around the inner obstacles automatically.
 # ---------------------------------------------------------------------------
 WAYPOINTS = [
-    ( 1.5,  0.0,   0.0),
-    ( 0.0,  1.5,  90.0),
-    (-1.5,  0.0, 180.0),
-    ( 0.0, -1.5, 270.0),
+    ( 0.8,  0.0,   0.0),
+    ( 0.0,  0.8,  90.0),
+    (-0.8,  0.0, 180.0),
+    ( 0.0, -0.8, 270.0),
     ( 0.0,  0.0,   0.0),   # return to start
 ]
 
@@ -56,8 +56,9 @@ class AutoNav(Node):
         self._nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
 
         self._waypoint_idx = 0
-        self._pose_published = 0   # how many times we've published the initial pose
-        self._MAX_POSE_PUB = 3     # publish it a few times so AMCL definitely catches it
+        self._pose_published = 0      # how many times we've published the initial pose
+        self._MAX_POSE_PUB = 3        # publish it a few times so AMCL definitely catches it
+        self._navigation_started = False
 
         # Poll every second until Nav2 is reachable, then start the sequence
         self._poll_timer = self.create_timer(1.0, self._poll)
