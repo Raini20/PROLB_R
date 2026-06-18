@@ -22,7 +22,7 @@ if(BUILD_TESTING)
 endif()
 
 # -----------------------------------------------------------------------
-# Filter nodes
+# C++ filter nodes
 # -----------------------------------------------------------------------
 
 add_executable(kf_node src/kf_node.cpp)
@@ -47,11 +47,30 @@ target_link_libraries(ekf_node Eigen3::Eigen)
 # target_link_libraries(pf_node Eigen3::Eigen)
 
 # -----------------------------------------------------------------------
+# Python nodes  (each installed separately so RENAME works correctly)
+# -----------------------------------------------------------------------
+
+install(PROGRAMS scripts/auto_nav.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME auto_nav)
+
+install(PROGRAMS scripts/data_logger.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME data_logger)
+
+# plot_results.py is a standalone analysis script, not a ROS2 node
+install(PROGRAMS scripts/plot_results.py
+  DESTINATION lib/${PROJECT_NAME})
+
+# -----------------------------------------------------------------------
 # Install
 # -----------------------------------------------------------------------
 
 install(TARGETS kf_node ekf_node
   DESTINATION lib/${PROJECT_NAME})
+
+# install(TARGETS pf_node
+#   DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch)
