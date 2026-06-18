@@ -79,8 +79,8 @@ class AutoNav(Node):
         # Initial pose sent — cancel poll timer and start navigating after a
         # short delay so AMCL has time to process the pose.
         self._poll_timer.cancel()
-        self.get_logger().info('AutoNav: initial pose set — starting in 3 s...')
-        self._start_timer = self.create_timer(3.0, self._start_navigation)
+        self.get_logger().info('AutoNav: initial pose set — starting in 8 s...')
+        self._start_timer = self.create_timer(8.0, self._start_navigation)
 
     # ------------------------------------------------------------------
     def _publish_initial_pose(self):
@@ -144,11 +144,15 @@ class AutoNav(Node):
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.get_logger().warn(
-                f'AutoNav: waypoint {self._waypoint_idx + 1} rejected — skipping.')
-            self._waypoint_idx += 1
-            self._send_next_waypoint()
+                f'AutoNav: waypoint {self._waypoint_idx + 1} rejected '
+                f'(Nav2 not ready?) — retrying in 3 s...')
+            # Retry the same waypoint after a short delay
+            self.create_timer(3.0, self._retry_waypoint)
             return
         goal_handle.get_result_async().add_done_callback(self._goal_done_cb)
+
+    def _retry_waypoint(self):
+        self._send_next_waypoint()
 
     def _goal_done_cb(self, future):
         self.get_logger().info(
