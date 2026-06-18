@@ -129,9 +129,8 @@ def plot(df: pd.DataFrame, out_path: str) -> None:
     for p in active:
         err   = pos_error(df, p)
         rmse  = cumulative_rmse(err)
-        final = rmse[-1]
         ax3.plot(t, rmse, '-', color=colors[p], lw=1.5,
-                 label=f'{labels[p]}  (RMSE = {final:.3f} m)')
+                 label=f'{labels[p]}  (RMSE = {rmse.iloc[-1]:.3f} m)')
 
     ax3.set_xlabel('Time [s]')
     ax3.set_ylabel('Cumulative RMSE [m]')

@@ -35,10 +35,10 @@ INITIAL_POSE = (0.0, 0.0, 0.0)
 # Nav2 plans around the inner obstacles automatically.
 # ---------------------------------------------------------------------------
 WAYPOINTS = [
-    ( 0.8,  0.0,   0.0),
-    ( 0.0,  0.8,  90.0),
-    (-0.8,  0.0, 180.0),
-    ( 0.0, -0.8, 270.0),
+    ( 0.0,  0.8,  90.0),   # north  (previously worked manually)
+    (-0.8,  0.0, 180.0),   # west
+    ( 0.0, -0.8, 270.0),   # south
+    ( 0.8,  0.0,   0.0),   # east
     ( 0.0,  0.0,   0.0),   # return to start
 ]
 
@@ -80,7 +80,7 @@ class AutoNav(Node):
         # short delay so AMCL has time to process the pose.
         self._poll_timer.cancel()
         self.get_logger().info('AutoNav: initial pose set — starting in 3 s...')
-        self.create_timer(3.0, self._start_navigation)
+        self._start_timer = self.create_timer(3.0, self._start_navigation)
 
     # ------------------------------------------------------------------
     def _publish_initial_pose(self):
@@ -106,6 +106,12 @@ class AutoNav(Node):
 
     # ------------------------------------------------------------------
     def _start_navigation(self):
+        # create_timer is repeating — cancel it and guard so we only start once
+        if hasattr(self, '_start_timer'):
+            self._start_timer.cancel()
+        if self._navigation_started:
+            return
+        self._navigation_started = True
         self.get_logger().info(
             f'AutoNav: starting route — {len(WAYPOINTS)} waypoints.')
         self._send_next_waypoint()
