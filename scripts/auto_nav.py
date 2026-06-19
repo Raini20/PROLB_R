@@ -20,8 +20,12 @@ import os
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
+from rclpy.qos import QoSProfile, DurabilityPolicy
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav2_msgs.action import NavigateToPose
+from visualization_msgs.msg import MarkerArray, Marker
+from std_msgs.msg import ColorRGBA
+from builtin_interfaces.msg import Duration
 
 # ---------------------------------------------------------------------------
 # Sentinel file written by _write_sentinel() when all waypoints are done.
@@ -59,6 +63,15 @@ class AutoNav(Node):
         self._initial_pose_pub = self.create_publisher(
             PoseWithCovarianceStamped, '/initialpose', 10)
 
+        # Publisher for waypoint markers in RViz.
+        # transient_local = "latched": RViz receives them even if it connects late.
+        latched_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self._marker_pub = self.create_publisher(
+            MarkerArray, '/waypoints_viz', latched_qos)
+
         # Nav2 action client
         self._nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
 
@@ -87,7 +100,57 @@ class AutoNav(Node):
         # short delay so AMCL has time to process the pose.
         self._poll_timer.cancel()
         self.get_logger().info('AutoNav: initial pose set — starting in 8 s...')
+        self._publish_waypoint_markers()
         self._start_timer = self.create_timer(8.0, self._start_navigation)
+
+    # ------------------------------------------------------------------
+    def _publish_waypoint_markers(self):
+        """Publish all waypoints as numbered sphere + label markers for RViz."""
+        now = self.get_clock().now().to_msg()
+        # Gold colour for spheres, white for labels
+        gold  = ColorRGBA(r=1.0, g=0.84, b=0.0, a=1.0)
+        white = ColorRGBA(r=1.0, g=1.0,  b=1.0, a=1.0)
+
+        array = MarkerArray()
+        for i, (x, y, theta_deg) in enumerate(WAYPOINTS):
+            # -- Sphere marker --
+            sphere = Marker()
+            sphere.header.frame_id = 'map'
+            sphere.header.stamp    = now
+            sphere.ns              = 'waypoints'
+            sphere.id              = i * 2          # even ids = spheres
+            sphere.type            = Marker.SPHERE
+            sphere.action          = Marker.ADD
+            sphere.pose.position.x = float(x)
+            sphere.pose.position.y = float(y)
+            sphere.pose.position.z = 0.15
+            sphere.pose.orientation.w = 1.0
+            sphere.scale.x = sphere.scale.y = sphere.scale.z = 0.12
+            sphere.color   = gold
+            sphere.lifetime = Duration(sec=0)       # 0 = forever
+
+            # -- Text label --
+            label = Marker()
+            label.header.frame_id = 'map'
+            label.header.stamp    = now
+            label.ns              = 'waypoints'
+            label.id              = i * 2 + 1       # odd ids = labels
+            label.type            = Marker.TEXT_VIEW_FACING
+            label.action          = Marker.ADD
+            label.pose.position.x = float(x)
+            label.pose.position.y = float(y)
+            label.pose.position.z = 0.30
+            label.pose.orientation.w = 1.0
+            label.scale.z  = 0.10                   # text height
+            label.color    = white
+            label.text     = f'WP{i + 1}'
+            label.lifetime = Duration(sec=0)
+
+            array.markers.extend([sphere, label])
+
+        self._marker_pub.publish(array)
+        self.get_logger().info(
+            f'AutoNav: published {len(WAYPOINTS)} waypoint markers on /waypoints_viz')
 
     # ------------------------------------------------------------------
     def _publish_initial_pose(self):
