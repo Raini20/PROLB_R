@@ -131,11 +131,14 @@ run_experiment() {
     rm -f "$SENTINEL"
 
     # ── Start the full stack ──────────────────────────────────────────────────
+    local launch_log="$LOGS_DIR/launch_${label}.log"
     info "Launching: ros2 launch ... pf:=true resampling:=$resampling" >&2
+    info "Launch log → $launch_log" >&2
+    info "  (follow with:  tail -f $launch_log)" >&2
     # setsid creates a new session → LAUNCH_PID becomes the process-group leader
     setsid ros2 launch probabilistic_robot_lab filters.launch.py \
         pf:=true resampling:="$resampling" \
-        >/dev/null 2>&1 &
+        >"$launch_log" 2>&1 &
     LAUNCH_PID=$!
     info "Launch PID: $LAUNCH_PID" >&2
 
