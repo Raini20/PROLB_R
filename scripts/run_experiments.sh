@@ -34,9 +34,10 @@
 #   5. Repeats for the second experiment (if requested).
 #   6. Calls run_plots.sh with both CSVs for the paper figures.
 # =============================================================================
-set -eo pipefail   # NOTE: -u intentionally omitted here — ROS2 setup scripts
-                   # reference unset variables internally, which would abort
-                   # under -u. It is re-enabled below after sourcing.
+
+# -u is intentionally NOT set here — ROS2 setup scripts reference unset
+# variables internally. It is enabled below after all source commands.
+set -eo pipefail
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,8 +49,8 @@ SENTINEL="$LOGS_DIR/.nav_done"
 RUN_WITH=true
 RUN_WITHOUT=true
 PLOTS=true
-TIMEOUT=300       # seconds before giving up on nav completion
-STARTUP_WAIT=40   # seconds to wait for Nav2 / AMCL to be ready
+TIMEOUT=300
+STARTUP_WAIT=40
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 for arg in "$@"; do
@@ -73,7 +74,7 @@ CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; }
-head_()  { echo -e "\n${BOLD}${CYAN}$*${NC}"; }
+head_() { echo -e "\n${BOLD}${CYAN}$*${NC}"; }
 
 # ── Source ROS2 ───────────────────────────────────────────────────────────────
 # shellcheck source=/dev/null
@@ -86,10 +87,9 @@ set -u
 
 mkdir -p "$LOGS_DIR"
 
-# ── Cleanup helper ────────────────────────────────────────────────────────────
-# Called on EXIT/INT/TERM to ensure the simulation is always stopped.
 LAUNCH_PID=""
 
+# ── Cleanup ───────────────────────────────────────────────────────────────────
 cleanup() {
     if [[ -n "$LAUNCH_PID" ]] && kill -0 "$LAUNCH_PID" 2>/dev/null; then
         info "Stopping simulation (PID $LAUNCH_PID)..."
@@ -101,108 +101,111 @@ cleanup() {
         while kill -0 "$LAUNCH_PID" 2>/dev/null && [[ $waited -lt 15 ]]; do
             sleep 1; ((waited++))
         done
-        # Force-kill anything still alive
         kill -SIGKILL -"$LAUNCH_PID" 2>/dev/null || true
     fi
     LAUNCH_PID=""
-    # Belt-and-braces: remove any lingering Gazebo / ROS processes
     pkill -f "gz sim"                2>/dev/null || true
     pkill -f "gzserver"              2>/dev/null || true
     pkill -f "robot_state_publisher" 2>/dev/null || true
     sleep 2
 }
 
-trap cleanup EXIT INT TERM
+# Separate handlers so INT/TERM exit the script; EXIT only cleans up once.
+on_signal() {
+    error "Interrupted — cleaning up..."
+    cleanup
+    exit 1
+}
+trap cleanup EXIT
+trap on_signal INT TERM
 
 # ── run_experiment ────────────────────────────────────────────────────────────
-# $1 = human label  ("with_resampling" | "without_resampling")
-# $2 = resampling   ("true"            | "false")
-# Prints the path of the saved CSV to stdout (last line); all other output
-# goes to stderr so it doesn't pollute the captured return value.
+# Runs entirely in the MAIN shell (no subshell).
+# $1 = label        ("with_resampling" | "without_resampling")
+# $2 = resampling   ("true" | "false")
 run_experiment() {
     local label="$1"
     local resampling="$2"
 
-    head_ "════════════════════════════════════════════════════════" >&2
-    head_ " EXPERIMENT: pf resampling=$resampling  [$label]"        >&2
-    head_ "════════════════════════════════════════════════════════" >&2
+    head_ "════════════════════════════════════════════════════════"
+    head_ " EXPERIMENT: pf resampling=$resampling  [$label]"
+    head_ "════════════════════════════════════════════════════════"
 
-    # Remove stale sentinel from a previous run
     rm -f "$SENTINEL"
 
-    # ── Start the full stack ──────────────────────────────────────────────────
+    # ── Launch ────────────────────────────────────────────────────────────────
     local launch_log="$LOGS_DIR/launch_${label}.log"
-    info "Launching: ros2 launch ... pf:=true resampling:=$resampling" >&2
-    info "Launch log → $launch_log" >&2
-    info "  (follow with:  tail -f $launch_log)" >&2
-    # setsid creates a new session → LAUNCH_PID becomes the process-group leader
+    info "Launching: ros2 launch ... pf:=true resampling:=$resampling"
+    info "Launch log  → $launch_log"
+    info "  follow:     tail -f $launch_log"
+
+    # setsid = new session so kill -PGID works cleanly and can't reach us
     setsid ros2 launch probabilistic_robot_lab filters.launch.py \
         pf:=true resampling:="$resampling" \
         >"$launch_log" 2>&1 &
     LAUNCH_PID=$!
-    info "Launch PID: $LAUNCH_PID" >&2
+    info "Launch PID: $LAUNCH_PID"
 
-    # ── Wait for Nav2 + AutoNav to initialise ─────────────────────────────────
-    info "Waiting ${STARTUP_WAIT}s for Nav2 / AutoNav to initialise..." >&2
+    # ── Wait for Nav2 / AutoNav to initialise ─────────────────────────────────
+    info "Waiting ${STARTUP_WAIT}s for Nav2 / AutoNav to initialise..."
     sleep "$STARTUP_WAIT"
 
     if ! kill -0 "$LAUNCH_PID" 2>/dev/null; then
-        error "Launch process died during startup — aborting." >&2
+        error "Launch process died during startup — aborting experiment."
         LAUNCH_PID=""
         return 1
     fi
 
-    # ── Poll for the sentinel file ─────────────────────────────────────────────
-    info "Waiting for AutoNav to finish (timeout: ${TIMEOUT}s)..." >&2
+    # ── Poll for sentinel ─────────────────────────────────────────────────────
+    info "Waiting for AutoNav to finish (timeout: ${TIMEOUT}s)..."
     local elapsed=0
     while [[ $elapsed -lt $TIMEOUT ]]; do
         if [[ -f "$SENTINEL" ]]; then
-            info "AutoNav finished ✓  (after ${elapsed}s)" >&2
+            info "AutoNav finished ✓  (after ${elapsed}s)"
             break
         fi
         if ! kill -0 "$LAUNCH_PID" 2>/dev/null; then
-            warn "Launch process exited early." >&2
+            warn "Launch process exited early."
             break
         fi
         sleep 2; ((elapsed += 2))
     done
 
     if [[ $elapsed -ge $TIMEOUT && ! -f "$SENTINEL" ]]; then
-        warn "Navigation timed out — using data collected so far." >&2
+        warn "Navigation timed out — using data collected so far."
     fi
 
-    # ── Save a labelled copy of the CSV ───────────────────────────────────────
-    local csv_out=""
+    # ── Save labelled CSV ─────────────────────────────────────────────────────
     local latest
     latest=$(ls -t "$LOGS_DIR"/filter_data_[0-9]*.csv 2>/dev/null | head -1 || true)
     if [[ -n "$latest" ]]; then
-        csv_out="$LOGS_DIR/filter_data_${label}.csv"
-        cp "$latest" "$csv_out"
-        info "CSV saved → $(basename "$csv_out")" >&2
+        local out="$LOGS_DIR/filter_data_${label}.csv"
+        cp "$latest" "$out"
+        info "CSV saved → $(basename "$out")"
     else
-        warn "No CSV found for this experiment." >&2
+        warn "No CSV found for this experiment."
     fi
 
     # ── Tear down ─────────────────────────────────────────────────────────────
-    info "Stopping simulation..." >&2
+    info "Stopping simulation..."
     cleanup
-    info "Done. Waiting 5 s before next experiment..." >&2
+    info "Waiting 5 s before next experiment..."
     sleep 5
-
-    # Return the CSV path to the caller (stdout only — no other output here)
-    echo "${csv_out:-}"
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
-CSV_WITH=""
-CSV_WITHOUT=""
+# CSV paths are deterministic — run_experiment always saves to filter_data_<label>.csv.
+# We compute them here directly instead of passing them through a variable, which
+# avoids any risk of stdout contamination from info()/cleanup() calls.
+CSV_WITH="$LOGS_DIR/filter_data_with_resampling.csv"
+CSV_WITHOUT="$LOGS_DIR/filter_data_without_resampling.csv"
 
 if $RUN_WITH; then
-    CSV_WITH=$(run_experiment "with_resampling" "true") || true
+    run_experiment "with_resampling" "true"
 fi
 
 if $RUN_WITHOUT; then
-    CSV_WITHOUT=$(run_experiment "without_resampling" "false") || true
+    run_experiment "without_resampling" "false"
 fi
 
 # ── Plots ─────────────────────────────────────────────────────────────────────
@@ -215,14 +218,15 @@ if $PLOTS; then
     if [[ ! -x "$PLOTS_SH" ]]; then
         warn "run_plots.sh not found / not executable at: $PLOTS_SH"
     else
-        if [[ -n "$CSV_WITH" && -n "$CSV_WITHOUT" ]]; then
-            bash "$PLOTS_SH" "$CSV_WITH" "$CSV_WITHOUT"
-        elif [[ -n "$CSV_WITH" ]]; then
-            bash "$PLOTS_SH" "$CSV_WITH"
-        elif [[ -n "$CSV_WITHOUT" ]]; then
-            bash "$PLOTS_SH" "$CSV_WITHOUT"
-        else
+        # Only pass a CSV if the file actually exists
+        PLOT_ARGS=()
+        [[ -f "$CSV_WITH"    ]] && PLOT_ARGS+=("$CSV_WITH")
+        [[ -f "$CSV_WITHOUT" ]] && PLOT_ARGS+=("$CSV_WITHOUT")
+
+        if [[ ${#PLOT_ARGS[@]} -eq 0 ]]; then
             warn "No CSVs available — skipping plots."
+        else
+            bash "$PLOTS_SH" "${PLOT_ARGS[@]}"
         fi
     fi
 fi
