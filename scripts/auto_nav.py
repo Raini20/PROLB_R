@@ -16,11 +16,18 @@ The robot spawns at (0, 0) in the tb3_sandbox map by default.
 """
 
 import math
+import os
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav2_msgs.action import NavigateToPose
+
+# ---------------------------------------------------------------------------
+# Sentinel file written by _write_sentinel() when all waypoints are done.
+# run_experiments.sh watches for this file to know when to stop the launch.
+# ---------------------------------------------------------------------------
+SENTINEL_PATH = os.path.expanduser('~/prob_ros_ws/logs/.nav_done')
 
 
 # ---------------------------------------------------------------------------
@@ -117,9 +124,19 @@ class AutoNav(Node):
         self._send_next_waypoint()
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    def _write_sentinel(self):
+        """Write a sentinel file so run_experiments.sh knows nav is done."""
+        os.makedirs(os.path.dirname(SENTINEL_PATH), exist_ok=True)
+        with open(SENTINEL_PATH, 'w') as f:
+            f.write(str(self.get_clock().now().nanoseconds))
+        self.get_logger().info(f'AutoNav: sentinel written → {SENTINEL_PATH}')
+
+    # ------------------------------------------------------------------
     def _send_next_waypoint(self):
         if self._waypoint_idx >= len(WAYPOINTS):
             self.get_logger().info('AutoNav: all waypoints completed.')
+            self._write_sentinel()
             return
 
         x, y, theta_deg = WAYPOINTS[self._waypoint_idx]
