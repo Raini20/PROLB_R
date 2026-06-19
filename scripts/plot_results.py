@@ -38,6 +38,18 @@ matplotlib.rcParams.update({
 
 LOG_DIR = os.path.expanduser('~/prob_ros_ws/logs')
 
+# ---------------------------------------------------------------------------
+# Waypoints — must match WAYPOINTS in auto_nav.py  [x, y, theta_deg]
+# ---------------------------------------------------------------------------
+# todo: DRY this up by importing from auto_nav.py or a shared config file
+WAYPOINTS = [
+    ( 0.0,  0.8,  90.0),   # WP1 — north
+    (-0.8,  0.0, 180.0),   # WP2 — west
+    ( 0.0, -0.8, 270.0),   # WP3 — south
+    ( 0.8,  0.0,   0.0),   # WP4 — east
+    ( 0.0,  0.0,   0.0),   # WP5 — return to start
+]
+
 
 def pos_error(df, prefix):
     dx = df[f'{prefix}_x'] - df['odom_x']
@@ -83,6 +95,13 @@ def plot(df, out_path):
                  color=colors[p], lw=1.3, label=labels[p], alpha=0.85)
     ax1.plot(df['odom_x'].iloc[0],  df['odom_y'].iloc[0],  'ko', ms=6, zorder=11, label='Start')
     ax1.plot(df['odom_x'].iloc[-1], df['odom_y'].iloc[-1], 'k^', ms=6, zorder=11, label='End')
+    # Waypoints — gold stars numbered WP1…WPn
+    for i, (wx, wy, _) in enumerate(WAYPOINTS):
+        ax1.plot(wx, wy, marker='*', color='#DAA520', ms=12, zorder=12,
+                 label='Goals' if i == 0 else None)
+        ax1.annotate(f'WP{i + 1}', xy=(wx, wy),
+                     xytext=(4, 6), textcoords='offset points',
+                     fontsize=7, color='#8B6914', fontweight='bold')
     ax1.set_xlabel('x [m]'); ax1.set_ylabel('y [m]')
     ax1.set_title('2D Trajectory'); ax1.legend(); ax1.set_aspect('equal', 'datalim')
     ax1.grid(True, alpha=0.3)
