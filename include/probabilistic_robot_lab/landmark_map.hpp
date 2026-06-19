@@ -38,9 +38,9 @@ struct Landmark {
 // *** Adjust these positions to match your simulation map! ***
 static const std::vector<Landmark> LANDMARK_MAP = {
     { 0.91, -0.59, "LM_P1"},
-    { 3.08, -0.65, "LM_P2"},
-    { 3.14,  1.53, "LM_P3"},
-    { 0.94,  1.58, "LM_P4"},
+    //{ 3.08, -0.65, "LM_P2"},
+    //{ 3.14,  1.53, "LM_P3"},
+    //{ 0.94,  1.58, "LM_P4"},
 };
 
 // -----------------------------------------------------------------------
