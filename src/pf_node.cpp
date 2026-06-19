@@ -238,17 +238,11 @@ private:
             normalizeWeights();
         }
 
-        // -------------------------------------------------------
-        // RESAMPLING — systematic resampling (Thrun Table 4.4)
-        // Disabled for Special Task to demonstrate degeneration.
-        // -------------------------------------------------------
-        if (do_resampling_) {
-            systematicResample();
-        }
-
-        // Effective sample size
+        // Effective sample size — computed BEFORE resampling so weights
+        // reflect actual particle diversity, not the uniform 1/N post-reset.
         //   N_eff = 1 / sum(w_i^2)   ∈ [1, N]
-        //   Tracks particle diversity; published for Special Task analysis
+        //   N_eff → N  : uniform weights, healthy diversity
+        //   N_eff → 1  : all weight on one particle (full degeneration)
         double sum_w2 = 0.0;
         for (const auto& p : particles_) sum_w2 += p.weight * p.weight;
         double n_eff = (sum_w2 > 1e-300) ? 1.0 / sum_w2 : 0.0;
@@ -256,6 +250,14 @@ private:
         auto neff_msg = std_msgs::msg::Float64();
         neff_msg.data = n_eff;
         n_eff_pub_->publish(neff_msg);
+
+        // -------------------------------------------------------
+        // RESAMPLING — systematic resampling (Thrun Table 4.4)
+        // Disabled for Special Task to demonstrate degeneration.
+        // -------------------------------------------------------
+        if (do_resampling_) {
+            systematicResample();
+        }
 
         publishPose();
         publishParticles();

@@ -43,11 +43,11 @@ LOG_DIR = os.path.expanduser('~/prob_ros_ws/logs')
 # ---------------------------------------------------------------------------
 # todo: DRY this up by importing from auto_nav.py or a shared config file
 WAYPOINTS = [
-    ( 0.0,  0.8,  90.0),   # WP1 — north
-    (-0.8,  0.0, 180.0),   # WP2 — west
-    ( 0.0, -0.8, 270.0),   # WP3 — south
-    ( 0.8,  0.0,   0.0),   # WP4 — east
-    ( 0.0,  0.0,   0.0),   # WP5 — return to start
+    ( 0.0,  1.8,  180.0),   # WP1 — north
+    (-1.8,  0.0, 270.0),   # WP2 — west
+    ( 0.0, -1.8, 0.0),   # WP3 — south
+    ( 1.8,  0.0,   90.0),   # WP4 — east
+    #( 0.0,  0.0,   0.0),   # WP5 — return to start
 ]
 
 
