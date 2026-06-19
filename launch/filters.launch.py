@@ -43,7 +43,7 @@ def generate_launch_description():
                               description='Launch Kalman Filter node'),
         DeclareLaunchArgument('ekf', default_value='true',
                               description='Launch Extended Kalman Filter node'),
-        DeclareLaunchArgument('pf',  default_value='false',
+        DeclareLaunchArgument('pf',  default_value='true',
                               description='Launch Particle Filter node'),
 
         # Noise experiment parameters (KF + EKF)

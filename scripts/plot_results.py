@@ -121,7 +121,7 @@ def plot(df, out_path):
 
     plt.savefig(out_path, bbox_inches='tight')
     print(f'Saved: {out_path}')
-    subprocess.Popen(['xdg-open', out_path])
+    subprocess.Popen(['explorer.exe', out_path.replace('/', '\\')])
 
 
 if __name__ == '__main__':

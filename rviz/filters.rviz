@@ -370,7 +370,7 @@ Visualization Manager:
             Reliability Policy: Reliable
             Value: /global_costmap/published_footprint
           Value: false
-      Enabled: true
+      Enabled: false
       Name: Global Planner
     - Class: rviz_common/Group
       Displays:
@@ -483,7 +483,7 @@ Visualization Manager:
           Use Fixed Frame: true
           Use rainbow: true
           Value: true
-      Enabled: true
+      Enabled: false
       Name: Controller
     - Class: rviz_common/Group
       Displays:
@@ -653,12 +653,19 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /pose_pf
       Value: true
-    - Alpha: 0.6
+    - Alpha: 0.6000000238418579
       Arrow Length: 0.20000000298023224
+      Axes Length: 0.30000001192092896
+      Axes Radius: 0.009999999776482582
       Class: rviz_default_plugins/PoseArray
       Color: 0; 200; 0
       Enabled: true
+      Head Length: 0.07000000029802322
+      Head Radius: 0.029999999329447746
       Name: PF Particles
+      Shaft Length: 0.23000000417232513
+      Shaft Radius: 0.009999999776482582
+      Shape: Arrow (Flat)
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -742,5 +749,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1610
-  X: 425
-  Y: 351
+  X: 393
+  Y: 319
