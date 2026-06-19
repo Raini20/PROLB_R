@@ -63,6 +63,10 @@ install(PROGRAMS scripts/plot_results.py
 install(PROGRAMS scripts/plot_n_eff.py
   DESTINATION lib/${PROJECT_NAME})
 
+install(PROGRAMS scripts/landmark_viz.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME landmark_viz)
+
 # -----------------------------------------------------------------------
 # Install
 # -----------------------------------------------------------------------

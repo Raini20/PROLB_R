@@ -38,7 +38,8 @@ SENTINEL_PATH = os.path.expanduser('~/prob_ros_ws/logs/.nav_done')
 # Robot spawn position in the map frame [x, y, theta_deg]
 # Check by echoing /odom right after startup; default TB3 sandbox = (0, 0, 0)
 # ---------------------------------------------------------------------------
-INITIAL_POSE = (1.0, -2.0, 90.0)
+#INITIAL_POSE = (1.0, -2.0, 90.0)
+INITIAL_POSE = (0.0, 0.0, 0.0)
 
 # ---------------------------------------------------------------------------
 # Fixed waypoints [x, y, theta_deg] in map frame.
@@ -46,10 +47,14 @@ INITIAL_POSE = (1.0, -2.0, 90.0)
 # Nav2 plans around the inner obstacles automatically.
 # ---------------------------------------------------------------------------
 WAYPOINTS = [
-    ( 0.0,  1.8,  180.0),   # north  (previously worked manually)
+    ( 0.0,  1.8,  180.0),   # north
     (-1.8,  0.0, 270.0),   # west
     ( 0.0, -1.8, 0.0),   # south
     ( 1.8,  0.0,   90.0),   # east
+    (-1.8,  0.0, 270.0),   # west
+    ( 0.0,  1.8,  180.0),   # north
+    ( 0.0, -1.8, 0.0),   # south
+    (-1.8,  0.0, 270.0),   # west
     #( 0.0,  0.0,   0.0),   # return to start
 ]
 
