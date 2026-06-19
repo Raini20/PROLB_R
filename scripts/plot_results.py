@@ -104,11 +104,16 @@ def plot(df, out_path):
                  color=colors[p], lw=1.3, label=labels[p], alpha=0.85)
     ax1.plot(df['odom_x'].iloc[0]  + sx, df['odom_y'].iloc[0]  + sy, 'ko', ms=6, zorder=11, label='Start')
     ax1.plot(df['odom_x'].iloc[-1] + sx, df['odom_y'].iloc[-1] + sy, 'k^', ms=6, zorder=11, label='End')
-    # Waypoints — gold stars numbered WP1…WPn
+    # Waypoints — gold stars; deduplicate positions, merge labels (e.g. WP2/5/8)
+    unique_wp: dict = {}  # (x, y) -> [1-based indices]
     for i, (wx, wy, _) in enumerate(WAYPOINTS):
+        key = (wx, wy)
+        unique_wp.setdefault(key, []).append(i + 1)
+    for idx, ((wx, wy), indices) in enumerate(unique_wp.items()):
+        lbl_text = 'WP' + '/'.join(str(n) for n in indices)
         ax1.plot(wx, wy, marker='*', color='#DAA520', ms=12, zorder=12,
-                 label='Goals' if i == 0 else None)
-        ax1.annotate(f'WP{i + 1}', xy=(wx, wy),
+                 label='Goals' if idx == 0 else None)
+        ax1.annotate(lbl_text, xy=(wx, wy),
                      xytext=(4, 6), textcoords='offset points',
                      fontsize=7, color='#8B6914', fontweight='bold')
     ax1.set_xlabel('x [m]'); ax1.set_ylabel('y [m]')
@@ -133,8 +138,11 @@ def plot(df, out_path):
 
     # ---- Panel 4: Covariance Trace ----
     ax4 = fig.add_subplot(gs[1, 1])
+    cov_ls = {'kf': '--', 'ekf': '-', 'pf': ':'}   # KF dashed so it stays visible behind EKF
+    cov_lw = {'kf': 1.8,  'ekf': 1.2, 'pf': 1.4}
     for p in active:
-        ax4.plot(t, cov_trace(df, p), color=colors[p], lw=1.2, label=labels[p])
+        ax4.plot(t, cov_trace(df, p), color=colors[p], lw=cov_lw[p],
+                 linestyle=cov_ls[p], label=labels[p])
     ax4.set_xlabel('Time [s]'); ax4.set_ylabel('trace(Σ) = Σ_xx + Σ_yy + Σ_θθ')
     ax4.set_title('Covariance Trace (Total Uncertainty)'); ax4.legend(); ax4.grid(True, alpha=0.3)
 
@@ -142,6 +150,9 @@ def plot(df, out_path):
     if nrows == 3:
         ax5 = fig.add_subplot(gs[2, :])
         ax5.plot(t, df['n_eff'], color=colors['pf'], lw=1.4, label='N_eff')
+        n_max = df['n_eff'].max()
+        ax5.set_ylim(0, n_max * 1.05)   # y-axis from 0 so scale is honest
+        ax5.axhline(y=n_max, color='gray', ls=':', lw=0.8, alpha=0.6, label=f'N_max = {int(n_max)}')
         ax5.set_xlabel('Time [s]')
         ax5.set_ylabel('N_eff = 1/Σwᵢ²')
         ax5.set_title('Effective Sample Size — Particle Diversity (Special Task)')
