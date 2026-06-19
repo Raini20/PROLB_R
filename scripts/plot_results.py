@@ -23,6 +23,7 @@ Dependencies:
 
 import sys
 import os
+import subprocess
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -120,7 +121,7 @@ def plot(df, out_path):
 
     plt.savefig(out_path, bbox_inches='tight')
     print(f'Saved: {out_path}')
-    plt.show()
+    subprocess.Popen(['xdg-open', out_path])
 
 
 if __name__ == '__main__':
