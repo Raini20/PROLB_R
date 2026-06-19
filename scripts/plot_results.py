@@ -38,6 +38,11 @@ matplotlib.rcParams.update({
 
 LOG_DIR = os.path.expanduser('~/prob_ros_ws/logs')
 
+# Spawn pose in the map frame (= odom origin). Must match INITIAL_POSE in auto_nav.py.
+# Logged poses are in the odom frame; adding this offset converts them to the map
+# frame so the trajectory is centred on the origin and lines up with the goal stars.
+SPAWN = (-1.96, -0.5)
+
 # ---------------------------------------------------------------------------
 # Waypoints — must match WAYPOINTS in auto_nav.py  [x, y, theta_deg]
 # ---------------------------------------------------------------------------
@@ -90,14 +95,15 @@ def plot(df, out_path):
 
     gs = gridspec.GridSpec(nrows, ncols, figure=fig, hspace=0.42, wspace=0.32)
 
-    # ---- Panel 1: 2D Trajectory ----
+    # ---- Panel 1: 2D Trajectory (odom-frame data shifted into map frame) ----
     ax1 = fig.add_subplot(gs[0, 0])
-    ax1.plot(df['odom_x'], df['odom_y'], 'k-', lw=2, label='Odom (GT)', zorder=10)
+    sx, sy = SPAWN
+    ax1.plot(df['odom_x'] + sx, df['odom_y'] + sy, 'k-', lw=2, label='Odom (GT)', zorder=10)
     for p in active:
-        ax1.plot(df[f'{p}_x'], df[f'{p}_y'], '--',
+        ax1.plot(df[f'{p}_x'] + sx, df[f'{p}_y'] + sy, '--',
                  color=colors[p], lw=1.3, label=labels[p], alpha=0.85)
-    ax1.plot(df['odom_x'].iloc[0],  df['odom_y'].iloc[0],  'ko', ms=6, zorder=11, label='Start')
-    ax1.plot(df['odom_x'].iloc[-1], df['odom_y'].iloc[-1], 'k^', ms=6, zorder=11, label='End')
+    ax1.plot(df['odom_x'].iloc[0]  + sx, df['odom_y'].iloc[0]  + sy, 'ko', ms=6, zorder=11, label='Start')
+    ax1.plot(df['odom_x'].iloc[-1] + sx, df['odom_y'].iloc[-1] + sy, 'k^', ms=6, zorder=11, label='End')
     # Waypoints — gold stars numbered WP1…WPn
     for i, (wx, wy, _) in enumerate(WAYPOINTS):
         ax1.plot(wx, wy, marker='*', color='#DAA520', ms=12, zorder=12,
