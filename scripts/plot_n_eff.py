@@ -66,6 +66,10 @@ def cumulative_rmse(err):
 def plot_single(df, label, ax_neff, ax_rmse, color, n_particles=500):
     t = df['time_s']
 
+    if globals().get('_T_TRIM') is not None:
+        df = df[df['time_s'] <= globals()['_T_TRIM']].copy()
+    t = df['time_s']
+
     # N_eff normalised to [0,1]
     n_eff_norm = df['n_eff'] / n_particles
     ax_neff.plot(t, n_eff_norm, color=color, lw=1.4, label=label)
@@ -91,6 +95,18 @@ def main():
 
     if len(sys.argv) >= 3:
         paths.append(sys.argv[2])
+    
+    # Trim both runs to the common time window for a fair comparison
+    if len(paths) == 2:
+        try:
+            t_max = min(pd.read_csv(p)['time_s'].max() for p in paths)
+            globals()['_T_TRIM'] = t_max
+            print(f'Trimming both runs to common window: t ≤ {t_max:.1f}s')
+        except Exception as e:
+            print(f'Trim skipped: {e}')
+            globals()['_T_TRIM'] = None
+    else:
+        globals()['_T_TRIM'] = None
 
     if not paths:
         print('No CSV files found.')
