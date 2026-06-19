@@ -26,6 +26,7 @@ from nav2_msgs.action import NavigateToPose
 from visualization_msgs.msg import MarkerArray, Marker
 from std_msgs.msg import ColorRGBA
 from builtin_interfaces.msg import Duration
+from action_msgs.msg import GoalStatus
 
 # ---------------------------------------------------------------------------
 # Sentinel file written by _write_sentinel() when all waypoints are done.
@@ -39,7 +40,8 @@ SENTINEL_PATH = os.path.expanduser('~/prob_ros_ws/logs/.nav_done')
 # Check by echoing /odom right after startup; default TB3 sandbox = (0, 0, 0)
 # ---------------------------------------------------------------------------
 #INITIAL_POSE = (1.0, -2.0, 90.0)
-INITIAL_POSE = (0.0, 0.0, 0.0)
+#INITIAL_POSE = (0.0, 0.0, 0.0)
+INITIAL_POSE = (-1.96, -0.5, 0.0)
 
 # ---------------------------------------------------------------------------
 # Fixed waypoints [x, y, theta_deg] in map frame.
@@ -231,17 +233,24 @@ class AutoNav(Node):
             self.get_logger().warn(
                 f'AutoNav: waypoint {self._waypoint_idx + 1} rejected '
                 f'(Nav2 not ready?) — retrying in 3 s...')
-            # Retry the same waypoint after a short delay
-            self.create_timer(3.0, self._retry_waypoint)
+            self._retry_timer = self.create_timer(3.0, self._retry_waypoint)
             return
         goal_handle.get_result_async().add_done_callback(self._goal_done_cb)
 
     def _retry_waypoint(self):
+        if hasattr(self, '_retry_timer'):
+            self._retry_timer.cancel()
         self._send_next_waypoint()
 
     def _goal_done_cb(self, future):
-        self.get_logger().info(
-            f'AutoNav: waypoint {self._waypoint_idx + 1} reached.')
+        status = future.result().status
+        if status == GoalStatus.STATUS_SUCCEEDED:
+            self.get_logger().info(
+                f'AutoNav: waypoint {self._waypoint_idx + 1} reached.')
+        else:
+            self.get_logger().warn(
+                f'AutoNav: waypoint {self._waypoint_idx + 1} did NOT succeed '
+                f'(status={status}) — continuing to next.')
         self._waypoint_idx += 1
         self._send_next_waypoint()
 
