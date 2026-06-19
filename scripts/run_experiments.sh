@@ -97,9 +97,13 @@ cleanup() {
         kill -SIGINT -"$LAUNCH_PID" 2>/dev/null \
             || kill -SIGINT "$LAUNCH_PID" 2>/dev/null \
             || true
+        # Wait for clean shutdown; use waited=$((waited+1)) instead of
+        # ((waited++)) — post-increment returns 0 on first iteration,
+        # which set -e would treat as a failure and abort the script.
         local waited=0
         while kill -0 "$LAUNCH_PID" 2>/dev/null && [[ $waited -lt 15 ]]; do
-            sleep 1; ((waited++))
+            sleep 1
+            waited=$((waited + 1))
         done
         kill -SIGKILL -"$LAUNCH_PID" 2>/dev/null || true
     fi
@@ -187,7 +191,6 @@ run_experiment() {
     fi
 
     # ── Tear down ─────────────────────────────────────────────────────────────
-    info "Stopping simulation..."
     cleanup
     info "Waiting 5 s before next experiment..."
     sleep 5
