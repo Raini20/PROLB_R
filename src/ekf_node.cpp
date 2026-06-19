@@ -176,7 +176,13 @@ private:
         msg.pose.pose.orientation.z = std::sin(mu_(2) / 2.0);
         msg.pose.pose.orientation.w = std::cos(mu_(2) / 2.0);
         msg.pose.covariance[0]  = Sigma_(0,0);
+        msg.pose.covariance[1]  = Sigma_(0,1);
+        msg.pose.covariance[5]  = Sigma_(0,2);
+        msg.pose.covariance[6]  = Sigma_(1,0);
         msg.pose.covariance[7]  = Sigma_(1,1);
+        msg.pose.covariance[11] = Sigma_(1,2);
+        msg.pose.covariance[30] = Sigma_(2,0);
+        msg.pose.covariance[31] = Sigma_(2,1);
         msg.pose.covariance[35] = Sigma_(2,2);
         pub_->publish(msg);
     }

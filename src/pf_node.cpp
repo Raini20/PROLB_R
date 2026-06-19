@@ -321,12 +321,17 @@ private:
         auto [mx, my, mth] = weightedMean();
 
         // Weighted variance (= covariance diagonal)
-        double vx = 0, vy = 0, vt = 0;
+        double vx = 0, vy = 0, vt = 0, vxy = 0, vxt = 0, vyt = 0;
         for (const auto& p : particles_) {
-            vx += p.weight * (p.x - mx) * (p.x - mx);
-            vy += p.weight * (p.y - my) * (p.y - my);
-            double dt = wrapAngle(p.theta - mth);
-            vt += p.weight * dt * dt;
+            double ex = p.x - mx;
+            double ey = p.y - my;
+            double et = wrapAngle(p.theta - mth);
+            vx  += p.weight * ex * ex;
+            vy  += p.weight * ey * ey;
+            vt  += p.weight * et * et;
+            vxy += p.weight * ex * ey;
+            vxt += p.weight * ex * et;
+            vyt += p.weight * ey * et;
         }
 
         auto msg = geometry_msgs::msg::PoseWithCovarianceStamped();
@@ -341,7 +346,13 @@ private:
         msg.pose.pose.orientation.w = std::cos(mth / 2.0);
 
         msg.pose.covariance[0]  = vx;
+        msg.pose.covariance[1]  = vxy;
+        msg.pose.covariance[5]  = vxt;
+        msg.pose.covariance[6]  = vxy;
         msg.pose.covariance[7]  = vy;
+        msg.pose.covariance[11] = vyt;
+        msg.pose.covariance[30] = vxt;
+        msg.pose.covariance[31] = vyt;
         msg.pose.covariance[35] = vt;
 
         pose_pub_->publish(msg);
