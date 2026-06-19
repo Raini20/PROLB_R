@@ -37,10 +37,10 @@ struct Landmark {
 
 // *** Adjust these positions to match your simulation map! ***
 static const std::vector<Landmark> LANDMARK_MAP = {
-    { 3.1,  1.0, "LM_N"},
-    { 2.0,  2.1, "LM_W"},
-    { 0.9,  1.0, "LM_S"},
-    //{ 2.0, -0.1, "LM_E"},
+    { 0.91, -0.59, "LM_P1"},
+    { 3.08, -0.65, "LM_P2"},
+    { 3.14,  1.53, "LM_P3"},
+    { 0.94,  1.58, "LM_P4"},
 };
 
 // -----------------------------------------------------------------------
@@ -49,8 +49,8 @@ static const std::vector<Landmark> LANDMARK_MAP = {
 
 // Max |r_measured - r_expected| [m] to accept a scan return as a detection.
 // Increase if landmarks are rarely detected; decrease if false detections occur.
-static constexpr double LM_GATE_M  = 0.80;
+static constexpr double LM_GATE_M  = 0.30;
 
 // Standard deviation of the range measurement [m].
 // Q_lm = LM_SIGMA_R^2  (scalar noise variance for the 1-D range observation).
-static constexpr double LM_SIGMA_R = 0.05;
+static constexpr double LM_SIGMA_R = 0.12;

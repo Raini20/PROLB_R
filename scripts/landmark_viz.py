@@ -19,13 +19,13 @@ import geometry_msgs.msg
 
 # Must match landmark_map.hpp — keep in sync!
 LANDMARK_MAP = [
-    ( 3.1,  1.0, "LM_N"),
-    ( 2.0,  2.1, "LM_W"),
-    ( 0.9,  1.0, "LM_S"),
-    ( 2.0, -0.1, "LM_E"),
+    ( 0.91, -0.59, "LM_P1"),
+    ( 3.08, -0.65, "LM_P2"),
+    ( 3.14,  1.53, "LM_P3"),
+    ( 0.94,  1.58, "LM_P4"),
 ]
-LM_GATE_M  = 0.40
-LM_SIGMA_R = 0.05
+LM_GATE_M  = 0.30
+LM_SIGMA_R = 0.12
 
 
 def wrap(a):
