@@ -34,7 +34,9 @@
 #   5. Repeats for the second experiment (if requested).
 #   6. Calls run_plots.sh with both CSVs for the paper figures.
 # =============================================================================
-set -euo pipefail
+set -eo pipefail   # NOTE: -u intentionally omitted here — ROS2 setup scripts
+                   # reference unset variables internally, which would abort
+                   # under -u. It is re-enabled below after sourcing.
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -78,6 +80,9 @@ head_()  { echo -e "\n${BOLD}${CYAN}$*${NC}"; }
 source /opt/ros/jazzy/setup.bash
 # shellcheck source=/dev/null
 source "$WS_DIR/install/setup.bash"
+
+# Re-enable unbound-variable check now that ROS2 setup scripts are done
+set -u
 
 mkdir -p "$LOGS_DIR"
 
