@@ -12,16 +12,24 @@ import os
 def generate_launch_description():
     """Single-command launch for the full probabilistic robot lab setup.
 
-    Starts everything in the correct order:
-        0 s  — Gazebo + Nav2 + AMCL (no separate RViz)
-        5 s  — KF, EKF, RViz, DataLogger
+    Startup order:
+        0 s  — Gazebo + Nav2 + AMCL (no Nav2 RViz)
+        5 s  — KF, EKF, PF (if enabled), RViz, DataLogger
        10 s  — AutoNav: sets initial pose and drives fixed waypoints
 
     Usage:
+        # Default: KF + EKF
         ros2 launch probabilistic_robot_lab filters.launch.py
 
-    Optional flags:
+        # Enable PF (standard, with resampling)
         ros2 launch probabilistic_robot_lab filters.launch.py pf:=true
+
+        # Special Task: PF without resampling (particle degeneration)
+        ros2 launch probabilistic_robot_lab filters.launch.py pf:=true resampling:=false
+
+        # Noise experiments (vary Q/R for KF and EKF)
+        ros2 launch probabilistic_robot_lab filters.launch.py \\
+            sigma_process:=0.1 sigma_meas:=0.01
     """
 
     nav2_share = get_package_share_directory('nav2_bringup')
@@ -31,18 +39,27 @@ def generate_launch_description():
         # ------------------------------------------------------------------
         # Launch arguments
         # ------------------------------------------------------------------
-        DeclareLaunchArgument(
-            'kf', default_value='true',
-            description='Launch Kalman Filter node'),
-        DeclareLaunchArgument(
-            'ekf', default_value='true',
-            description='Launch Extended Kalman Filter node'),
-        DeclareLaunchArgument(
-            'pf', default_value='false',
-            description='Launch Particle Filter node (enable once implemented)'),
+        DeclareLaunchArgument('kf',  default_value='true',
+                              description='Launch Kalman Filter node'),
+        DeclareLaunchArgument('ekf', default_value='true',
+                              description='Launch Extended Kalman Filter node'),
+        DeclareLaunchArgument('pf',  default_value='false',
+                              description='Launch Particle Filter node'),
+
+        # Noise experiment parameters (KF + EKF)
+        DeclareLaunchArgument('sigma_process', default_value='0.01',
+                              description='Process noise std dev (scales R)'),
+        DeclareLaunchArgument('sigma_meas',    default_value='0.10',
+                              description='Measurement noise std dev (scales Q)'),
+
+        # PF parameters
+        DeclareLaunchArgument('num_particles', default_value='500',
+                              description='Number of PF particles'),
+        DeclareLaunchArgument('resampling',    default_value='true',
+                              description='Enable resampling in PF (false = Special Task)'),
 
         # ------------------------------------------------------------------
-        # 1.  Simulation — Gazebo + Nav2 + AMCL  (no Nav2 RViz)
+        # 1. Simulation — Gazebo + Nav2 (no Nav2 RViz)
         # ------------------------------------------------------------------
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
@@ -52,41 +69,49 @@ def generate_launch_description():
         ),
 
         # ------------------------------------------------------------------
-        # 2.  Filter nodes + RViz + DataLogger  (delayed 5 s)
+        # 2. Filter nodes + RViz + DataLogger (delayed 5 s)
         # ------------------------------------------------------------------
         TimerAction(period=5.0, actions=[
 
-            # KF node
             Node(
                 package='probabilistic_robot_lab',
                 executable='kf_node',
                 name='kf_node',
                 output='screen',
-                parameters=[{'use_sim_time': True}],
+                parameters=[{
+                    'use_sim_time':   True,
+                    'sigma_process':  LaunchConfiguration('sigma_process'),
+                    'sigma_meas':     LaunchConfiguration('sigma_meas'),
+                }],
                 condition=IfCondition(LaunchConfiguration('kf')),
             ),
 
-            # EKF node
             Node(
                 package='probabilistic_robot_lab',
                 executable='ekf_node',
                 name='ekf_node',
                 output='screen',
-                parameters=[{'use_sim_time': True}],
+                parameters=[{
+                    'use_sim_time':   True,
+                    'sigma_process':  LaunchConfiguration('sigma_process'),
+                    'sigma_meas':     LaunchConfiguration('sigma_meas'),
+                }],
                 condition=IfCondition(LaunchConfiguration('ekf')),
             ),
 
-            # PF node  (enable with pf:=true once pf_node is built)
             Node(
                 package='probabilistic_robot_lab',
                 executable='pf_node',
                 name='pf_node',
                 output='screen',
-                parameters=[{'use_sim_time': True}],
+                parameters=[{
+                    'use_sim_time':   True,
+                    'num_particles':  LaunchConfiguration('num_particles'),
+                    'resampling':     LaunchConfiguration('resampling'),
+                }],
                 condition=IfCondition(LaunchConfiguration('pf')),
             ),
 
-            # RViz with our config
             Node(
                 package='rviz2',
                 executable='rviz2',
@@ -99,7 +124,6 @@ def generate_launch_description():
                 parameters=[{'use_sim_time': True}],
             ),
 
-            # Data logger — writes CSV to ~/prob_ros_ws/logs/
             Node(
                 package='probabilistic_robot_lab',
                 executable='data_logger',
@@ -110,7 +134,7 @@ def generate_launch_description():
         ]),
 
         # ------------------------------------------------------------------
-        # 3.  AutoNav — sets initial pose, then drives fixed waypoints
+        # 3. AutoNav — sets initial pose and drives fixed waypoints
         # ------------------------------------------------------------------
         TimerAction(period=10.0, actions=[
             Node(

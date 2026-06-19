@@ -5,7 +5,6 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# Dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -39,15 +38,15 @@ target_include_directories(ekf_node PUBLIC
 ament_target_dependencies(ekf_node rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs)
 target_link_libraries(ekf_node Eigen3::Eigen)
 
-# add_executable(pf_node src/pf_node.cpp)
-# target_include_directories(pf_node PUBLIC
-#   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-#   $<INSTALL_INTERFACE:include>)
-# ament_target_dependencies(pf_node rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs)
-# target_link_libraries(pf_node Eigen3::Eigen)
+add_executable(pf_node src/pf_node.cpp)
+target_include_directories(pf_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+ament_target_dependencies(pf_node rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs)
+target_link_libraries(pf_node Eigen3::Eigen)
 
 # -----------------------------------------------------------------------
-# Python nodes  (each installed separately so RENAME works correctly)
+# Python nodes
 # -----------------------------------------------------------------------
 
 install(PROGRAMS scripts/auto_nav.py
@@ -58,19 +57,18 @@ install(PROGRAMS scripts/data_logger.py
   DESTINATION lib/${PROJECT_NAME}
   RENAME data_logger)
 
-# plot_results.py is a standalone analysis script, not a ROS2 node
 install(PROGRAMS scripts/plot_results.py
+  DESTINATION lib/${PROJECT_NAME})
+
+install(PROGRAMS scripts/plot_n_eff.py
   DESTINATION lib/${PROJECT_NAME})
 
 # -----------------------------------------------------------------------
 # Install
 # -----------------------------------------------------------------------
 
-install(TARGETS kf_node ekf_node
+install(TARGETS kf_node ekf_node pf_node
   DESTINATION lib/${PROJECT_NAME})
-
-# install(TARGETS pf_node
-#   DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch)
