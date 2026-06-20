@@ -6,6 +6,7 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "probabilistic_robot_lab/landmark_map.hpp"
+#include "probabilistic_robot_lab/landmark_detector.hpp"
 #include <Eigen/Dense>
 #include <random>
 #include <cmath>
@@ -77,7 +78,6 @@ static inline double gaussianLikelihood(double err, double sigma)
 
 struct Particle { double x, y, theta, weight; };
 
-struct LandmarkObs { double mx, my, range; };
 
 // ============================================================
 
@@ -155,31 +155,12 @@ private:
     // ----------------------------------------------------------
     void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
     {
-        // Use current weighted-mean pose to find expected bearing
+        // Stage 1: detect real pillars from the raw scan (no pose used).
+        // Stage 2: associate each detection to a known map landmark using
+        //          the current weighted-mean pose (matching only).
         auto [mx, my, mth] = weightedMean();
-        detected_lm_.clear();
-
-        for (const auto& lm : LANDMARK_MAP) {
-            double dx    = lm.x - mx;
-            double dy    = lm.y - my;
-            double r_exp = std::sqrt(dx*dx + dy*dy);
-
-            if (r_exp < msg->range_min + 0.05 || r_exp > msg->range_max - 0.05) continue;
-
-            double bearing = wrapAngle(std::atan2(dy, dx) - mth);
-            if (bearing < msg->angle_min || bearing > msg->angle_max) continue;
-
-            int idx = static_cast<int>(
-                std::round((bearing - msg->angle_min) / msg->angle_increment));
-            if (idx < 0 || idx >= static_cast<int>(msg->ranges.size())) continue;
-
-            float r_meas = msg->ranges[idx];
-            if (!std::isfinite(r_meas)) continue;
-            if (r_meas < msg->range_min || r_meas > msg->range_max) continue;
-            if (std::abs(r_meas - r_exp) > LM_GATE_M) continue;
-
-            detected_lm_.push_back({lm.x, lm.y, static_cast<double>(r_meas)});
-        }
+        auto cyl     = detectCylinders(msg);
+        detected_lm_ = associateLandmarks(cyl, mx, my, mth);
     }
 
     // ----------------------------------------------------------

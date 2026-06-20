@@ -54,3 +54,33 @@ static constexpr double LM_GATE_M  = 0.30;
 // Standard deviation of the range measurement [m].
 // Q_lm = LM_SIGMA_R^2  (scalar noise variance for the 1-D range observation).
 static constexpr double LM_SIGMA_R = 0.12;
+
+// -----------------------------------------------------------------------
+// Cylinder detector parameters (used by landmark_detector.hpp)
+// -----------------------------------------------------------------------
+
+// Radius of a pillar [m].  The laser measures the SURFACE; the map stores
+// the CENTER, so the detector adds this to get a centre range.
+// *** SET THIS TO YOUR WORLD'S PILLAR RADIUS. ***
+static constexpr double LM_RADIUS      = 0.15;
+
+// Max range jump between adjacent beams [m] before a cluster is split.
+// Larger -> clusters merge across gaps; smaller -> pillars fragment.
+static constexpr double LM_CLUSTER_GAP = 0.10;
+
+// Minimum number of beams a cluster must contain to be considered.
+static constexpr int    LM_MIN_PTS     = 3;
+
+// Accepted physical chord width of a cluster [m].  Pillars are narrow;
+// walls produce wide clusters and are rejected by the upper bound.
+static constexpr double LM_MIN_WIDTH   = 0.05;
+static constexpr double LM_MAX_WIDTH   = 0.45;
+
+// Max distance [m] between a detected pillar (projected with the current
+// pose) and a known map landmark to accept the association.
+static constexpr double LM_ASSOC_GATE  = 0.60;
+// Min gap [m] between the nearest and second-nearest map landmark for an
+// association to count as unambiguous.  With identical, closely-spaced
+// pillars this is the guard against the estimate jumping between them.
+// Rule of thumb: < (minimum pillar spacing) - LM_ASSOC_GATE.
+static constexpr double LM_ASSOC_MARGIN = 0.40;

@@ -4,6 +4,7 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "probabilistic_robot_lab/landmark_map.hpp"
+#include "probabilistic_robot_lab/landmark_detector.hpp"
 #include <Eigen/Dense>
 #include <cmath>
 #include <vector>
@@ -33,7 +34,6 @@
  * ref: Thrun (2006) Table 3.3 + Table 7.2
  */
 
-struct LandmarkObs { double mx, my, range; };
 
 static inline double wrapAngle(double a)
 {
@@ -91,23 +91,11 @@ private:
 
     void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
     {
-        detected_.clear();
-        for (const auto& lm : LANDMARK_MAP) {
-            double dx    = lm.x - mu_(0);
-            double dy    = lm.y - mu_(1);
-            double r_exp = std::sqrt(dx*dx + dy*dy);
-            if (r_exp < msg->range_min + 0.05 || r_exp > msg->range_max - 0.05) continue;
-            double bearing = wrapAngle(std::atan2(dy, dx) - mu_(2));
-            if (bearing < msg->angle_min || bearing > msg->angle_max) continue;
-            int idx = static_cast<int>(
-                std::round((bearing - msg->angle_min) / msg->angle_increment));
-            if (idx < 0 || idx >= static_cast<int>(msg->ranges.size())) continue;
-            float r_meas = msg->ranges[idx];
-            if (!std::isfinite(r_meas)) continue;
-            if (r_meas < msg->range_min || r_meas > msg->range_max) continue;
-            if (std::abs(r_meas - r_exp) > LM_GATE_M) continue;
-            detected_.push_back({lm.x, lm.y, static_cast<double>(r_meas)});
-        }
+        // Stage 1: detect real pillars from the raw scan (no pose used).
+        // Stage 2: associate each detection to a known map landmark using
+        //          the current estimate mu_ (matching only).
+        auto cyl  = detectCylinders(msg);
+        detected_ = associateLandmarks(cyl, mu_(0), mu_(1), mu_(2));
     }
 
     void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
