@@ -5,6 +5,7 @@
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "probabilistic_robot_lab/landmark_map.hpp"
 #include "probabilistic_robot_lab/landmark_detector.hpp"
+#include "probabilistic_robot_lab/wall_detector.hpp"
 #include <Eigen/Dense>
 #include <cmath>
 #include <vector>
@@ -99,6 +100,10 @@ private:
         //          the current estimate mu_ (matching only).
         auto cyl  = detectCylinders(msg);
         detected_ = associateLandmarks(cyl, mu_(0), mu_(1), mu_(2));
+
+        // RANSAC wall lines: extraction (pose-independent) + association.
+        auto lines = extractWalls(msg);
+        walls_     = associateWalls(lines, mu_(0), mu_(1), mu_(2));
     }
 
     void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
@@ -148,6 +153,33 @@ private:
             Sigma_  = (Eigen::Matrix3d::Identity() - K_lm * C_lm) * Sigma_;
         }
 
+        // CORRECTION 3: Walls (RANSAC line features)
+        // Line measurement model is LINEAR in the pose -> the KF update is
+        // EXACT here (no linearization), unlike the range measurement.
+        for (const auto& w : walls_) {
+            const double ca = std::cos(w.aw), sa = std::sin(w.aw);
+
+            Eigen::Vector2d z(w.a_meas, w.r_meas);
+            Eigen::Vector2d zhat(w.aw - mu_(2),
+                                 w.rw - (mu_(0) * ca + mu_(1) * sa));
+            Eigen::Vector2d innov = z - zhat;
+            innov(0) = wrapAngle(innov(0));
+
+            Eigen::Matrix<double,2,3> C_w;
+            C_w <<   0.0, 0.0, -1.0,
+                     -ca,  -sa,  0.0;
+
+            Eigen::Matrix2d R_w = Eigen::Matrix2d::Zero();
+            R_w(0,0) = WALL_SIGMA_A * WALL_SIGMA_A;
+            R_w(1,1) = WALL_SIGMA_R * WALL_SIGMA_R;
+
+            Eigen::Matrix2d S_w = C_w * Sigma_ * C_w.transpose() + R_w;
+            Eigen::Matrix<double,3,2> K_w = Sigma_ * C_w.transpose() * S_w.inverse();
+            mu_    += K_w * innov;
+            mu_(2)  = wrapAngle(mu_(2));
+            Sigma_  = (Eigen::Matrix3d::Identity() - K_w * C_w) * Sigma_;
+        }
+
         publishPose();
     }
 
@@ -181,6 +213,7 @@ private:
     bool            odom_received_;
     rclcpp::Time    last_odom_time_, last_time_;
     std::vector<LandmarkObs> detected_;
+    std::vector<WallObs>     walls_;
 
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr     cmd_vel_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr       odom_sub_;

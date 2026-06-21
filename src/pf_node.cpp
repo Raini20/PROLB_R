@@ -7,6 +7,7 @@
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "probabilistic_robot_lab/landmark_map.hpp"
 #include "probabilistic_robot_lab/landmark_detector.hpp"
+#include "probabilistic_robot_lab/wall_detector.hpp"
 #include <Eigen/Dense>
 #include <random>
 #include <cmath>
@@ -161,6 +162,10 @@ private:
         auto [mx, my, mth] = weightedMean();
         auto cyl     = detectCylinders(msg);
         detected_lm_ = associateLandmarks(cyl, mx, my, mth);
+
+        // RANSAC wall lines: extraction (pose-independent) + association.
+        auto lines = extractWalls(msg);
+        walls_     = associateWalls(lines, mx, my, mth);
     }
 
     // ----------------------------------------------------------
@@ -194,7 +199,7 @@ private:
         bool odom_valid = odom_received_ &&
             (this->get_clock()->now() - last_odom_time_).seconds() < 0.5;
 
-        if (odom_valid || !detected_lm_.empty()) {
+        if (odom_valid || !detected_lm_.empty() || !walls_.empty()) {
             for (auto& p : particles_) {
                 double w = 1.0;
 
@@ -211,6 +216,16 @@ private:
                     double dy    = obs.my - p.y;
                     double r_exp = std::sqrt(dx*dx + dy*dy);
                     w *= gaussianLikelihood(obs.range - r_exp, LM_SIGMA_R);
+                }
+
+                // Wall line likelihood (RANSAC features): linear model
+                //   a_pred = aw - theta ,  r_pred = rw - (x*cos aw + y*sin aw)
+                for (const auto& wl : walls_) {
+                    double ca = std::cos(wl.aw), sa = std::sin(wl.aw);
+                    double a_pred = wl.aw - p.theta;
+                    double r_pred = wl.rw - (p.x * ca + p.y * sa);
+                    w *= gaussianLikelihood(wrapAngle(wl.a_meas - a_pred), WALL_SIGMA_A);
+                    w *= gaussianLikelihood(wl.r_meas - r_pred,            WALL_SIGMA_R);
                 }
 
                 p.weight *= std::max(w, 1e-300);   // guard against underflow
@@ -369,6 +384,7 @@ private:
     Eigen::Vector3d  z_odom_;
     rclcpp::Time     last_odom_time_;
     std::vector<LandmarkObs> detected_lm_;
+    std::vector<WallObs>     walls_;
 
     // ---- Noise parameters ----
     double sigma_v_, sigma_omega_;

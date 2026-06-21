@@ -78,12 +78,45 @@ def has_data(df, prefix):
     return f'{prefix}_x' in df.columns and df[f'{prefix}_x'].notna().any()
 
 
+def shaded_spans(t, mask):
+    """Yield (t_start, t_end) for each contiguous True run in `mask` (aligned with `t`)."""
+    mask = np.asarray(mask, dtype=bool)
+    if not mask.any():
+        return
+    t = np.asarray(t)
+    idx = np.where(mask)[0]
+    splits = np.where(np.diff(idx) > 1)[0] + 1
+    for g in np.split(idx, splits):
+        yield t[g[0]], t[g[-1]]
+
+
+def add_detection_shading(ax, t, lm_mask, wall_mask):
+    """Light background shading showing when the landmark / wall correction
+    was active (feature visible + associated), so error spikes can be read
+    against feature visibility rather than purely against time."""
+    first = True
+    if lm_mask is not None:
+        for t0, t1 in shaded_spans(t, lm_mask):
+            ax.axvspan(t0, t1, color='#2ca02c', alpha=0.10, lw=0, zorder=0,
+                       label='Landmark visible' if first else None)
+            first = False
+    first = True
+    if wall_mask is not None:
+        for t0, t1 in shaded_spans(t, wall_mask):
+            ax.axvspan(t0, t1, color='#9467bd', alpha=0.10, lw=0, zorder=0,
+                       label='Wall visible' if first else None)
+            first = False
+
+
 def plot(df, out_path):
     t      = df['time_s']
     colors = {'kf': '#1f77b4', 'ekf': '#d62728', 'pf': '#2ca02c'}
     labels = {'kf': 'KF',      'ekf': 'EKF',     'pf': 'PF'}
     active = [p for p in ('kf', 'ekf', 'pf') if has_data(df, p)]
     has_neff = 'n_eff' in df.columns and df['n_eff'].notna().any()
+
+    lm_mask   = (df['lm_count']   > 0) if 'lm_count'   in df.columns else None
+    wall_mask = (df['wall_count'] > 0) if 'wall_count' in df.columns else None
 
     ncols = 2
     nrows = 3 if (has_neff and 'pf' in active) else 2
@@ -122,6 +155,7 @@ def plot(df, out_path):
 
     # ---- Panel 2: Position Error ----
     ax2 = fig.add_subplot(gs[0, 1])
+    add_detection_shading(ax2, t, lm_mask, wall_mask)
     for p in active:
         ax2.plot(t, pos_error(df, p), color=colors[p], lw=1.2, label=labels[p])
     ax2.set_xlabel('Time [s]'); ax2.set_ylabel('‖p_filter − p_odom‖ [m]')
@@ -129,6 +163,7 @@ def plot(df, out_path):
 
     # ---- Panel 3: Cumulative RMSE ----
     ax3 = fig.add_subplot(gs[1, 0])
+    add_detection_shading(ax3, t, lm_mask, wall_mask)
     for p in active:
         rmse  = cumulative_rmse(pos_error(df, p))
         ax3.plot(t, rmse, color=colors[p], lw=1.5,
@@ -138,6 +173,7 @@ def plot(df, out_path):
 
     # ---- Panel 4: Covariance Trace ----
     ax4 = fig.add_subplot(gs[1, 1])
+    add_detection_shading(ax4, t, lm_mask, wall_mask)
     cov_ls = {'kf': '--', 'ekf': '-', 'pf': ':'}   # KF dashed so it stays visible behind EKF
     cov_lw = {'kf': 1.8,  'ekf': 1.2, 'pf': 1.4}
     for p in active:
@@ -149,6 +185,7 @@ def plot(df, out_path):
     # ---- Panel 5: N_eff (PF only) ----
     if nrows == 3:
         ax5 = fig.add_subplot(gs[2, :])
+        add_detection_shading(ax5, t, lm_mask, wall_mask)
         ax5.plot(t, df['n_eff'], color=colors['pf'], lw=1.4, label='N_eff')
         n_max = df['n_eff'].max()
         ax5.set_ylim(0, n_max * 1.05)   # y-axis from 0 so scale is honest
