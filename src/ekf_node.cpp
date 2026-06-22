@@ -7,6 +7,7 @@
 #include "probabilistic_robot_lab/landmark_map.hpp"
 #include "probabilistic_robot_lab/landmark_detector.hpp"
 #include "probabilistic_robot_lab/wall_detector.hpp"
+#include "probabilistic_robot_lab/detection_markers.hpp"
 #include <Eigen/Dense>
 #include <cmath>
 #include <vector>
@@ -77,6 +78,8 @@ public:
             "/ekf_landmark_count", 10);
         wall_count_pub_ = this->create_publisher<std_msgs::msg::Int32>(
             "/ekf_wall_count", 10);
+        marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/ekf_markers", 10);
 
         last_time_ = this->get_clock()->now();
         RCLCPP_INFO(this->get_logger(),
@@ -121,6 +124,10 @@ private:
         std_msgs::msg::Int32 wall_msg;
         wall_msg.data = static_cast<int32_t>(walls_.size());
         wall_count_pub_->publish(wall_msg);
+
+        marker_pub_->publish(buildDetectionMarkers(
+            mu_(0), mu_(1), detected_, walls_, "ekf",
+            0.84f, 0.15f, 0.16f, this->get_clock()->now()));
     }
 
     void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
@@ -242,6 +249,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pub_;
     rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr lm_count_pub_;
     rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr wall_count_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
 };
 
 int main(int argc, char **argv)

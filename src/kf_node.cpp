@@ -6,6 +6,7 @@
 #include "probabilistic_robot_lab/landmark_map.hpp"
 #include "probabilistic_robot_lab/landmark_detector.hpp"
 #include "probabilistic_robot_lab/wall_detector.hpp"
+#include "probabilistic_robot_lab/detection_markers.hpp"
 #include <Eigen/Dense>
 #include <cmath>
 #include <vector>
@@ -75,6 +76,8 @@ public:
             std::bind(&KalmanFilterNode::scanCallback, this, std::placeholders::_1));
         pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
             "/pose_kf", 10);
+        marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/kf_markers", 10);
 
         last_time_ = this->get_clock()->now();
         RCLCPP_INFO(this->get_logger(),
@@ -104,6 +107,10 @@ private:
         // RANSAC wall lines: extraction (pose-independent) + association.
         auto lines = extractWalls(msg);
         walls_     = associateWalls(lines, mu_(0), mu_(1), mu_(2));
+
+        marker_pub_->publish(buildDetectionMarkers(
+            mu_(0), mu_(1), detected_, walls_, "kf",
+            0.12f, 0.47f, 0.71f, this->get_clock()->now()));
     }
 
     void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
@@ -219,6 +226,7 @@ private:
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr       odom_sub_;
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr   scan_sub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
 };
 
 int main(int argc, char **argv)

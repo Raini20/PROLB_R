@@ -8,6 +8,7 @@
 #include "probabilistic_robot_lab/landmark_map.hpp"
 #include "probabilistic_robot_lab/landmark_detector.hpp"
 #include "probabilistic_robot_lab/wall_detector.hpp"
+#include "probabilistic_robot_lab/detection_markers.hpp"
 #include <Eigen/Dense>
 #include <random>
 #include <cmath>
@@ -130,6 +131,8 @@ public:
             "/pf_particles", 10);
         n_eff_pub_     = this->create_publisher<std_msgs::msg::Float64>(
             "/n_eff", 10);
+        marker_pub_    = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/pf_markers", 10);
 
         last_time_ = this->get_clock()->now();
 
@@ -166,6 +169,10 @@ private:
         // RANSAC wall lines: extraction (pose-independent) + association.
         auto lines = extractWalls(msg);
         walls_     = associateWalls(lines, mx, my, mth);
+
+        marker_pub_->publish(buildDetectionMarkers(
+            mx, my, detected_lm_, walls_, "pf",
+            0.17f, 0.63f, 0.17f, this->get_clock()->now()));
     }
 
     // ----------------------------------------------------------
@@ -399,6 +406,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr    particles_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr           n_eff_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
 };
 
 // ============================================================
