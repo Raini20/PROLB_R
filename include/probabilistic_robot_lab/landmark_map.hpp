@@ -35,10 +35,13 @@ struct Landmark {
     const char* name;   // debug label (printed in RCLCPP_DEBUG)
 };
 
-// *** Adjust these positions to match your simulation map! ***
+// Only the middle-left pillar paired with the left corner walls.
+// This combined feature (cylinder + two wall segments) is the single
+// unambiguous anchor in the arena.  Neither the pillar alone (any of the
+// 9 identical pillars could match) nor the wall alone (association uses
+// the current pose estimate) is sufficient.  Together they are unique.
 static const std::vector<Landmark> LANDMARK_MAP = {
-    //{ 0.91, -0.59, "LM_P1"},
-    { 0.9175, 0.4675, "LM_ML"},   // middle-left pillar, paired with the left corner
+    { 0.9175, 0.4675, "LM_ML"},   // middle-left pillar — left corner anchor
     //{ 3.08, -0.65, "LM_P2"},
     //{ 3.14,  1.53, "LM_P3"},
     //{ 0.94,  1.58, "LM_P4"},

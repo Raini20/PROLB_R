@@ -5,9 +5,7 @@
 #include "std_msgs/msg/float64.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
-#include "probabilistic_robot_lab/landmark_map.hpp"
-#include "probabilistic_robot_lab/landmark_detector.hpp"
-#include "probabilistic_robot_lab/wall_detector.hpp"
+#include "probabilistic_robot_lab/anchor.hpp"
 #include "probabilistic_robot_lab/detection_markers.hpp"
 #include <Eigen/Dense>
 #include <random>
@@ -206,7 +204,7 @@ private:
         bool odom_valid = odom_received_ &&
             (this->get_clock()->now() - last_odom_time_).seconds() < 0.5;
 
-        if (odom_valid || !detected_lm_.empty() || !walls_.empty()) {
+        if (odom_valid || anchor_detected(detected_lm_, walls_)) {
             for (auto& p : particles_) {
                 double w = 1.0;
 
@@ -217,23 +215,27 @@ private:
                     w *= gaussianLikelihood(wrapAngle(z_odom_(2) - p.theta), sigma_odom_th_);
                 }
 
-                // Landmark range likelihood
-                for (const auto& obs : detected_lm_) {
-                    double dx    = obs.mx - p.x;
-                    double dy    = obs.my - p.y;
-                    double r_exp = std::sqrt(dx*dx + dy*dy);
-                    w *= gaussianLikelihood(obs.range - r_exp, LM_SIGMA_R);
-                }
+                // Combined anchor: landmark range + wall likelihood.
+                // Applied only when both the anchor pillar and corner walls
+                // are simultaneously detected — neither alone is unambiguous.
+                if (anchor_detected(detected_lm_, walls_)) {
 
-                // Wall line likelihood (RANSAC features): linear model
-                //   a_pred = aw - theta ,  r_pred = rw - (x*cos aw + y*sin aw)
-                for (const auto& wl : walls_) {
-                    double ca = std::cos(wl.aw), sa = std::sin(wl.aw);
-                    double a_pred = wl.aw - p.theta;
-                    double r_pred = wl.rw - (p.x * ca + p.y * sa);
-                    w *= gaussianLikelihood(wrapAngle(wl.a_meas - a_pred), WALL_SIGMA_A);
-                    w *= gaussianLikelihood(wl.r_meas - r_pred,            WALL_SIGMA_R);
-                }
+                    for (const auto& obs : detected_lm_) {
+                        double dx    = obs.mx - p.x;
+                        double dy    = obs.my - p.y;
+                        double r_exp = std::sqrt(dx*dx + dy*dy);
+                        w *= gaussianLikelihood(obs.range - r_exp, LM_SIGMA_R);
+                    }
+
+                    for (const auto& wl : walls_) {
+                        double ca = std::cos(wl.aw), sa = std::sin(wl.aw);
+                        double a_pred = wl.aw - p.theta;
+                        double r_pred = wl.rw - (p.x * ca + p.y * sa);
+                        w *= gaussianLikelihood(wrapAngle(wl.a_meas - a_pred), WALL_SIGMA_A);
+                        w *= gaussianLikelihood(wl.r_meas - r_pred,            WALL_SIGMA_R);
+                    }
+
+                } // end anchor gate
 
                 p.weight *= std::max(w, 1e-300);   // guard against underflow
             }

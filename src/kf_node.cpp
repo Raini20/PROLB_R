@@ -3,9 +3,7 @@
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
-#include "probabilistic_robot_lab/landmark_map.hpp"
-#include "probabilistic_robot_lab/landmark_detector.hpp"
-#include "probabilistic_robot_lab/wall_detector.hpp"
+#include "probabilistic_robot_lab/anchor.hpp"
 #include "probabilistic_robot_lab/detection_markers.hpp"
 #include <Eigen/Dense>
 #include <cmath>
@@ -145,47 +143,53 @@ private:
             mu_ = mu_bar;  Sigma_ = Sigma_bar;
         }
 
-        // CORRECTION 2: Landmarks
-        for (const auto& obs : detected_) {
-            double dx = obs.mx - mu_(0), dy = obs.my - mu_(1);
-            double r2 = dx*dx + dy*dy, r = std::sqrt(r2);
-            if (r < 1e-4) continue;
-            Eigen::Matrix<double,1,3> C_lm;
-            C_lm << -dx/r, -dy/r, 0.0;
-            double innov = obs.range - r;
-            double S_lm  = (C_lm * Sigma_ * C_lm.transpose())(0,0) + q_lm_;
-            Eigen::Vector3d K_lm = Sigma_ * C_lm.transpose() / S_lm;
-            mu_    += K_lm * innov;
-            mu_(2)  = wrapAngle(mu_(2));
-            Sigma_  = (Eigen::Matrix3d::Identity() - K_lm * C_lm) * Sigma_;
-        }
+        // CORRECTION 2 + 3: Combined anchor feature (LM_ML pillar + corner walls)
+        // -----------------------------------------------------------------------
+        // See ekf_node.cpp for rationale.  Wall measurement model is LINEAR
+        // in the pose, so the KF update here is exact (no linearization needed).
+        if (anchor_detected(detected_, walls_)) {
 
-        // CORRECTION 3: Walls (RANSAC line features)
-        // Line measurement model is LINEAR in the pose -> the KF update is
-        // EXACT here (no linearization), unlike the range measurement.
-        for (const auto& w : walls_) {
-            const double ca = std::cos(w.aw), sa = std::sin(w.aw);
+            // Landmark range correction
+            for (const auto& obs : detected_) {
+                double dx = obs.mx - mu_(0), dy = obs.my - mu_(1);
+                double r2 = dx*dx + dy*dy, r = std::sqrt(r2);
+                if (r < 1e-4) continue;
+                Eigen::Matrix<double,1,3> C_lm;
+                C_lm << -dx/r, -dy/r, 0.0;
+                double innov = obs.range - r;
+                double S_lm  = (C_lm * Sigma_ * C_lm.transpose())(0,0) + q_lm_;
+                Eigen::Vector3d K_lm = Sigma_ * C_lm.transpose() / S_lm;
+                mu_    += K_lm * innov;
+                mu_(2)  = wrapAngle(mu_(2));
+                Sigma_  = (Eigen::Matrix3d::Identity() - K_lm * C_lm) * Sigma_;
+            }
 
-            Eigen::Vector2d z(w.a_meas, w.r_meas);
-            Eigen::Vector2d zhat(w.aw - mu_(2),
-                                 w.rw - (mu_(0) * ca + mu_(1) * sa));
-            Eigen::Vector2d innov = z - zhat;
-            innov(0) = wrapAngle(innov(0));
+            // Wall correction (exact linear model)
+            for (const auto& w : walls_) {
+                const double ca = std::cos(w.aw), sa = std::sin(w.aw);
 
-            Eigen::Matrix<double,2,3> C_w;
-            C_w <<   0.0, 0.0, -1.0,
-                     -ca,  -sa,  0.0;
+                Eigen::Vector2d z(w.a_meas, w.r_meas);
+                Eigen::Vector2d zhat(w.aw - mu_(2),
+                                     w.rw - (mu_(0) * ca + mu_(1) * sa));
+                Eigen::Vector2d innov = z - zhat;
+                innov(0) = wrapAngle(innov(0));
 
-            Eigen::Matrix2d R_w = Eigen::Matrix2d::Zero();
-            R_w(0,0) = WALL_SIGMA_A * WALL_SIGMA_A;
-            R_w(1,1) = WALL_SIGMA_R * WALL_SIGMA_R;
+                Eigen::Matrix<double,2,3> C_w;
+                C_w <<   0.0, 0.0, -1.0,
+                         -ca,  -sa,  0.0;
 
-            Eigen::Matrix2d S_w = C_w * Sigma_ * C_w.transpose() + R_w;
-            Eigen::Matrix<double,3,2> K_w = Sigma_ * C_w.transpose() * S_w.inverse();
-            mu_    += K_w * innov;
-            mu_(2)  = wrapAngle(mu_(2));
-            Sigma_  = (Eigen::Matrix3d::Identity() - K_w * C_w) * Sigma_;
-        }
+                Eigen::Matrix2d R_w = Eigen::Matrix2d::Zero();
+                R_w(0,0) = WALL_SIGMA_A * WALL_SIGMA_A;
+                R_w(1,1) = WALL_SIGMA_R * WALL_SIGMA_R;
+
+                Eigen::Matrix2d S_w = C_w * Sigma_ * C_w.transpose() + R_w;
+                Eigen::Matrix<double,3,2> K_w = Sigma_ * C_w.transpose() * S_w.inverse();
+                mu_    += K_w * innov;
+                mu_(2)  = wrapAngle(mu_(2));
+                Sigma_  = (Eigen::Matrix3d::Identity() - K_w * C_w) * Sigma_;
+            }
+
+        } // end anchor gate
 
         publishPose();
     }

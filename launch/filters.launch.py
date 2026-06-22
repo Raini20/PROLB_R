@@ -131,14 +131,6 @@ def generate_launch_description():
                 output='screen',
                 parameters=[{'use_sim_time': True}],
             ),
-
-            Node(
-                package='probabilistic_robot_lab',
-                executable='landmark_viz',
-                name='landmark_viz',
-                output='screen',
-                parameters=[{'use_sim_time': True}],
-            ),
         ]),
 
         # ------------------------------------------------------------------

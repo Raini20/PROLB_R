@@ -4,9 +4,7 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "std_msgs/msg/int32.hpp"
-#include "probabilistic_robot_lab/landmark_map.hpp"
-#include "probabilistic_robot_lab/landmark_detector.hpp"
-#include "probabilistic_robot_lab/wall_detector.hpp"
+#include "probabilistic_robot_lab/anchor.hpp"
 #include "probabilistic_robot_lab/detection_markers.hpp"
 #include <Eigen/Dense>
 #include <cmath>
@@ -117,12 +115,16 @@ private:
         // Publish raw detection counts (stage 1+2, pose-independent up to the
         // small association-pose dependence) for paper plots — lets us shade
         // "feature visible" periods on the error/RMSE/covariance time series.
+        // Publish detection counts for the data logger / plot shading.
+        // anchor_count > 0 only when the combined feature fires; the
+        // separate lm/wall counts are kept for debugging.
+        bool anc = anchor_detected(detected_, walls_);
         std_msgs::msg::Int32 lm_msg;
-        lm_msg.data = static_cast<int32_t>(detected_.size());
+        lm_msg.data = anc ? static_cast<int32_t>(detected_.size()) : 0;
         lm_count_pub_->publish(lm_msg);
 
         std_msgs::msg::Int32 wall_msg;
-        wall_msg.data = static_cast<int32_t>(walls_.size());
+        wall_msg.data = anc ? static_cast<int32_t>(walls_.size()) : 0;
         wall_count_pub_->publish(wall_msg);
 
         marker_pub_->publish(buildDetectionMarkers(
@@ -166,47 +168,56 @@ private:
             mu_ = mu_bar;  Sigma_ = Sigma_bar;
         }
 
-        // CORRECTION 2: Landmarks
-        for (const auto& obs : detected_) {
-            double dx = obs.mx - mu_(0), dy = obs.my - mu_(1);
-            double r2 = dx*dx + dy*dy, r = std::sqrt(r2);
-            if (r < 1e-4) continue;
-            Eigen::Matrix<double,1,3> H_j;
-            H_j << -dx/r, -dy/r, 0.0;
-            double innov = obs.range - r;
-            double S_j   = (H_j * Sigma_ * H_j.transpose())(0,0) + q_lm_;
-            Eigen::Vector3d K_j = Sigma_ * H_j.transpose() / S_j;
-            mu_    += K_j * innov;
-            mu_(2)  = wrapAngle(mu_(2));
-            Sigma_  = (Eigen::Matrix3d::Identity() - K_j * H_j) * Sigma_;
-        }
+        // CORRECTION 2 + 3: Combined anchor feature (LM_ML pillar + corner walls)
+        // -----------------------------------------------------------------------
+        // Neither the pillar alone (any of the 9 identical pillars could match)
+        // nor the wall alone (association uses the current pose estimate) is an
+        // unambiguous fix.  Together — one cylinder next to two specific wall
+        // segments — the feature is unique in the arena and the correction is
+        // applied without relying purely on the prior pose estimate for identity.
+        if (anchor_detected(detected_, walls_)) {
 
-        // CORRECTION 3: Walls (RANSAC line features)
-        // Measurement z = [alpha_meas; rho_meas]; model is LINEAR in the pose,
-        // so H_w is a constant 2x3 (exact for KF and EKF alike).
-        for (const auto& w : walls_) {
-            const double ca = std::cos(w.aw), sa = std::sin(w.aw);
+            // Landmark range correction (one update per detected landmark)
+            for (const auto& obs : detected_) {
+                double dx = obs.mx - mu_(0), dy = obs.my - mu_(1);
+                double r2 = dx*dx + dy*dy, r = std::sqrt(r2);
+                if (r < 1e-4) continue;
+                Eigen::Matrix<double,1,3> H_j;
+                H_j << -dx/r, -dy/r, 0.0;
+                double innov = obs.range - r;
+                double S_j   = (H_j * Sigma_ * H_j.transpose())(0,0) + q_lm_;
+                Eigen::Vector3d K_j = Sigma_ * H_j.transpose() / S_j;
+                mu_    += K_j * innov;
+                mu_(2)  = wrapAngle(mu_(2));
+                Sigma_  = (Eigen::Matrix3d::Identity() - K_j * H_j) * Sigma_;
+            }
 
-            Eigen::Vector2d z(w.a_meas, w.r_meas);
-            Eigen::Vector2d zhat(w.aw - mu_(2),
-                                 w.rw - (mu_(0) * ca + mu_(1) * sa));
-            Eigen::Vector2d innov = z - zhat;
-            innov(0) = wrapAngle(innov(0));
+            // Wall correction — linear model, exact for KF and EKF alike
+            for (const auto& w : walls_) {
+                const double ca = std::cos(w.aw), sa = std::sin(w.aw);
 
-            Eigen::Matrix<double,2,3> H_w;
-            H_w <<   0.0, 0.0, -1.0,
-                     -ca,  -sa,  0.0;
+                Eigen::Vector2d z(w.a_meas, w.r_meas);
+                Eigen::Vector2d zhat(w.aw - mu_(2),
+                                     w.rw - (mu_(0) * ca + mu_(1) * sa));
+                Eigen::Vector2d innov = z - zhat;
+                innov(0) = wrapAngle(innov(0));
 
-            Eigen::Matrix2d R_w = Eigen::Matrix2d::Zero();
-            R_w(0,0) = WALL_SIGMA_A * WALL_SIGMA_A;
-            R_w(1,1) = WALL_SIGMA_R * WALL_SIGMA_R;
+                Eigen::Matrix<double,2,3> H_w;
+                H_w <<   0.0, 0.0, -1.0,
+                         -ca,  -sa,  0.0;
 
-            Eigen::Matrix2d S_w = H_w * Sigma_ * H_w.transpose() + R_w;
-            Eigen::Matrix<double,3,2> K_w = Sigma_ * H_w.transpose() * S_w.inverse();
-            mu_    += K_w * innov;
-            mu_(2)  = wrapAngle(mu_(2));
-            Sigma_  = (Eigen::Matrix3d::Identity() - K_w * H_w) * Sigma_;
-        }
+                Eigen::Matrix2d R_w = Eigen::Matrix2d::Zero();
+                R_w(0,0) = WALL_SIGMA_A * WALL_SIGMA_A;
+                R_w(1,1) = WALL_SIGMA_R * WALL_SIGMA_R;
+
+                Eigen::Matrix2d S_w = H_w * Sigma_ * H_w.transpose() + R_w;
+                Eigen::Matrix<double,3,2> K_w = Sigma_ * H_w.transpose() * S_w.inverse();
+                mu_    += K_w * innov;
+                mu_(2)  = wrapAngle(mu_(2));
+                Sigma_  = (Eigen::Matrix3d::Identity() - K_w * H_w) * Sigma_;
+            }
+
+        } // end anchor gate
 
         publishPose();
     }
