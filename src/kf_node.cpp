@@ -3,7 +3,8 @@
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
-#include "probabilistic_robot_lab/landmark_map.hpp"
+#include "probabilistic_robot_lab/anchor.hpp"
+#include "probabilistic_robot_lab/detection_markers.hpp"
 #include <Eigen/Dense>
 #include <cmath>
 #include <vector>
@@ -35,7 +36,6 @@
  * ref: Thrun (2006) Table 3.1
  */
 
-struct LandmarkObs { double mx, my, range; };
 
 static inline double wrapAngle(double a)
 {
@@ -74,6 +74,8 @@ public:
             std::bind(&KalmanFilterNode::scanCallback, this, std::placeholders::_1));
         pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
             "/pose_kf", 10);
+        marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/kf_markers", 10);
 
         last_time_ = this->get_clock()->now();
         RCLCPP_INFO(this->get_logger(),
@@ -94,23 +96,19 @@ private:
 
     void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
     {
-        detected_.clear();
-        for (const auto& lm : LANDMARK_MAP) {
-            double dx    = lm.x - mu_(0);
-            double dy    = lm.y - mu_(1);
-            double r_exp = std::sqrt(dx*dx + dy*dy);
-            if (r_exp < msg->range_min + 0.05 || r_exp > msg->range_max - 0.05) continue;
-            double bearing = wrapAngle(std::atan2(dy, dx) - mu_(2));
-            if (bearing < msg->angle_min || bearing > msg->angle_max) continue;
-            int idx = static_cast<int>(
-                std::round((bearing - msg->angle_min) / msg->angle_increment));
-            if (idx < 0 || idx >= static_cast<int>(msg->ranges.size())) continue;
-            float r_meas = msg->ranges[idx];
-            if (!std::isfinite(r_meas)) continue;
-            if (r_meas < msg->range_min || r_meas > msg->range_max) continue;
-            if (std::abs(r_meas - r_exp) > LM_GATE_M) continue;
-            detected_.push_back({lm.x, lm.y, static_cast<double>(r_meas)});
-        }
+        // Stage 1: detect real pillars from the raw scan (no pose used).
+        // Stage 2: associate each detection to a known map landmark using
+        //          the current estimate mu_ (matching only).
+        auto cyl  = detectCylinders(msg);
+        detected_ = associateLandmarks(cyl, mu_(0), mu_(1), mu_(2));
+
+        // RANSAC wall lines: extraction (pose-independent) + association.
+        auto lines = extractWalls(msg);
+        walls_     = associateWalls(lines, mu_(0), mu_(1), mu_(2));
+
+        marker_pub_->publish(buildDetectionMarkers(
+            mu_(0), mu_(1), detected_, walls_, "kf",
+            0.12f, 0.47f, 0.71f, this->get_clock()->now()));
     }
 
     void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
@@ -145,20 +143,53 @@ private:
             mu_ = mu_bar;  Sigma_ = Sigma_bar;
         }
 
-        // CORRECTION 2: Landmarks
-        for (const auto& obs : detected_) {
-            double dx = obs.mx - mu_(0), dy = obs.my - mu_(1);
-            double r2 = dx*dx + dy*dy, r = std::sqrt(r2);
-            if (r < 1e-4) continue;
-            Eigen::Matrix<double,1,3> C_lm;
-            C_lm << -dx/r, -dy/r, 0.0;
-            double innov = obs.range - r;
-            double S_lm  = (C_lm * Sigma_ * C_lm.transpose())(0,0) + q_lm_;
-            Eigen::Vector3d K_lm = Sigma_ * C_lm.transpose() / S_lm;
-            mu_    += K_lm * innov;
-            mu_(2)  = wrapAngle(mu_(2));
-            Sigma_  = (Eigen::Matrix3d::Identity() - K_lm * C_lm) * Sigma_;
-        }
+        // CORRECTION 2 + 3: Combined anchor feature (LM_ML pillar + corner walls)
+        // -----------------------------------------------------------------------
+        // See ekf_node.cpp for rationale.  Wall measurement model is LINEAR
+        // in the pose, so the KF update here is exact (no linearization needed).
+        if (anchor_detected(detected_, walls_)) {
+
+            // Landmark range correction
+            for (const auto& obs : detected_) {
+                double dx = obs.mx - mu_(0), dy = obs.my - mu_(1);
+                double r2 = dx*dx + dy*dy, r = std::sqrt(r2);
+                if (r < 1e-4) continue;
+                Eigen::Matrix<double,1,3> C_lm;
+                C_lm << -dx/r, -dy/r, 0.0;
+                double innov = obs.range - r;
+                double S_lm  = (C_lm * Sigma_ * C_lm.transpose())(0,0) + q_lm_;
+                Eigen::Vector3d K_lm = Sigma_ * C_lm.transpose() / S_lm;
+                mu_    += K_lm * innov;
+                mu_(2)  = wrapAngle(mu_(2));
+                Sigma_  = (Eigen::Matrix3d::Identity() - K_lm * C_lm) * Sigma_;
+            }
+
+            // Wall correction (exact linear model)
+            for (const auto& w : walls_) {
+                const double ca = std::cos(w.aw), sa = std::sin(w.aw);
+
+                Eigen::Vector2d z(w.a_meas, w.r_meas);
+                Eigen::Vector2d zhat(w.aw - mu_(2),
+                                     w.rw - (mu_(0) * ca + mu_(1) * sa));
+                Eigen::Vector2d innov = z - zhat;
+                innov(0) = wrapAngle(innov(0));
+
+                Eigen::Matrix<double,2,3> C_w;
+                C_w <<   0.0, 0.0, -1.0,
+                         -ca,  -sa,  0.0;
+
+                Eigen::Matrix2d R_w = Eigen::Matrix2d::Zero();
+                R_w(0,0) = WALL_SIGMA_A * WALL_SIGMA_A;
+                R_w(1,1) = WALL_SIGMA_R * WALL_SIGMA_R;
+
+                Eigen::Matrix2d S_w = C_w * Sigma_ * C_w.transpose() + R_w;
+                Eigen::Matrix<double,3,2> K_w = Sigma_ * C_w.transpose() * S_w.inverse();
+                mu_    += K_w * innov;
+                mu_(2)  = wrapAngle(mu_(2));
+                Sigma_  = (Eigen::Matrix3d::Identity() - K_w * C_w) * Sigma_;
+            }
+
+        } // end anchor gate
 
         publishPose();
     }
@@ -193,11 +224,13 @@ private:
     bool            odom_received_;
     rclcpp::Time    last_odom_time_, last_time_;
     std::vector<LandmarkObs> detected_;
+    std::vector<WallObs>     walls_;
 
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr     cmd_vel_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr       odom_sub_;
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr   scan_sub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
 };
 
 int main(int argc, char **argv)

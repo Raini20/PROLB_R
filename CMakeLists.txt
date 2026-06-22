@@ -11,6 +11,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 if(BUILD_TESTING)
@@ -28,21 +29,21 @@ add_executable(kf_node src/kf_node.cpp)
 target_include_directories(kf_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
-ament_target_dependencies(kf_node rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs)
+ament_target_dependencies(kf_node rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs visualization_msgs)
 target_link_libraries(kf_node Eigen3::Eigen)
 
 add_executable(ekf_node src/ekf_node.cpp)
 target_include_directories(ekf_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
-ament_target_dependencies(ekf_node rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs)
+ament_target_dependencies(ekf_node rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs visualization_msgs)
 target_link_libraries(ekf_node Eigen3::Eigen)
 
 add_executable(pf_node src/pf_node.cpp)
 target_include_directories(pf_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
-ament_target_dependencies(pf_node rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs)
+ament_target_dependencies(pf_node rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs visualization_msgs)
 target_link_libraries(pf_node Eigen3::Eigen)
 
 # -----------------------------------------------------------------------
@@ -62,10 +63,6 @@ install(PROGRAMS scripts/plot_results.py
 
 install(PROGRAMS scripts/plot_n_eff.py
   DESTINATION lib/${PROJECT_NAME})
-
-install(PROGRAMS scripts/landmark_viz.py
-  DESTINATION lib/${PROJECT_NAME}
-  RENAME landmark_viz)
 
 # -----------------------------------------------------------------------
 # Install

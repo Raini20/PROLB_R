@@ -5,7 +5,8 @@
 #include "std_msgs/msg/float64.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
-#include "probabilistic_robot_lab/landmark_map.hpp"
+#include "probabilistic_robot_lab/anchor.hpp"
+#include "probabilistic_robot_lab/detection_markers.hpp"
 #include <Eigen/Dense>
 #include <random>
 #include <cmath>
@@ -77,7 +78,6 @@ static inline double gaussianLikelihood(double err, double sigma)
 
 struct Particle { double x, y, theta, weight; };
 
-struct LandmarkObs { double mx, my, range; };
 
 // ============================================================
 
@@ -129,6 +129,8 @@ public:
             "/pf_particles", 10);
         n_eff_pub_     = this->create_publisher<std_msgs::msg::Float64>(
             "/n_eff", 10);
+        marker_pub_    = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/pf_markers", 10);
 
         last_time_ = this->get_clock()->now();
 
@@ -155,31 +157,20 @@ private:
     // ----------------------------------------------------------
     void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
     {
-        // Use current weighted-mean pose to find expected bearing
+        // Stage 1: detect real pillars from the raw scan (no pose used).
+        // Stage 2: associate each detection to a known map landmark using
+        //          the current weighted-mean pose (matching only).
         auto [mx, my, mth] = weightedMean();
-        detected_lm_.clear();
+        auto cyl     = detectCylinders(msg);
+        detected_lm_ = associateLandmarks(cyl, mx, my, mth);
 
-        for (const auto& lm : LANDMARK_MAP) {
-            double dx    = lm.x - mx;
-            double dy    = lm.y - my;
-            double r_exp = std::sqrt(dx*dx + dy*dy);
+        // RANSAC wall lines: extraction (pose-independent) + association.
+        auto lines = extractWalls(msg);
+        walls_     = associateWalls(lines, mx, my, mth);
 
-            if (r_exp < msg->range_min + 0.05 || r_exp > msg->range_max - 0.05) continue;
-
-            double bearing = wrapAngle(std::atan2(dy, dx) - mth);
-            if (bearing < msg->angle_min || bearing > msg->angle_max) continue;
-
-            int idx = static_cast<int>(
-                std::round((bearing - msg->angle_min) / msg->angle_increment));
-            if (idx < 0 || idx >= static_cast<int>(msg->ranges.size())) continue;
-
-            float r_meas = msg->ranges[idx];
-            if (!std::isfinite(r_meas)) continue;
-            if (r_meas < msg->range_min || r_meas > msg->range_max) continue;
-            if (std::abs(r_meas - r_exp) > LM_GATE_M) continue;
-
-            detected_lm_.push_back({lm.x, lm.y, static_cast<double>(r_meas)});
-        }
+        marker_pub_->publish(buildDetectionMarkers(
+            mx, my, detected_lm_, walls_, "pf",
+            0.17f, 0.63f, 0.17f, this->get_clock()->now()));
     }
 
     // ----------------------------------------------------------
@@ -213,7 +204,7 @@ private:
         bool odom_valid = odom_received_ &&
             (this->get_clock()->now() - last_odom_time_).seconds() < 0.5;
 
-        if (odom_valid || !detected_lm_.empty()) {
+        if (odom_valid || anchor_detected(detected_lm_, walls_)) {
             for (auto& p : particles_) {
                 double w = 1.0;
 
@@ -224,13 +215,27 @@ private:
                     w *= gaussianLikelihood(wrapAngle(z_odom_(2) - p.theta), sigma_odom_th_);
                 }
 
-                // Landmark range likelihood
-                for (const auto& obs : detected_lm_) {
-                    double dx    = obs.mx - p.x;
-                    double dy    = obs.my - p.y;
-                    double r_exp = std::sqrt(dx*dx + dy*dy);
-                    w *= gaussianLikelihood(obs.range - r_exp, LM_SIGMA_R);
-                }
+                // Combined anchor: landmark range + wall likelihood.
+                // Applied only when both the anchor pillar and corner walls
+                // are simultaneously detected — neither alone is unambiguous.
+                if (anchor_detected(detected_lm_, walls_)) {
+
+                    for (const auto& obs : detected_lm_) {
+                        double dx    = obs.mx - p.x;
+                        double dy    = obs.my - p.y;
+                        double r_exp = std::sqrt(dx*dx + dy*dy);
+                        w *= gaussianLikelihood(obs.range - r_exp, LM_SIGMA_R);
+                    }
+
+                    for (const auto& wl : walls_) {
+                        double ca = std::cos(wl.aw), sa = std::sin(wl.aw);
+                        double a_pred = wl.aw - p.theta;
+                        double r_pred = wl.rw - (p.x * ca + p.y * sa);
+                        w *= gaussianLikelihood(wrapAngle(wl.a_meas - a_pred), WALL_SIGMA_A);
+                        w *= gaussianLikelihood(wl.r_meas - r_pred,            WALL_SIGMA_R);
+                    }
+
+                } // end anchor gate
 
                 p.weight *= std::max(w, 1e-300);   // guard against underflow
             }
@@ -388,6 +393,7 @@ private:
     Eigen::Vector3d  z_odom_;
     rclcpp::Time     last_odom_time_;
     std::vector<LandmarkObs> detected_lm_;
+    std::vector<WallObs>     walls_;
 
     // ---- Noise parameters ----
     double sigma_v_, sigma_omega_;
@@ -402,6 +408,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr    particles_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr           n_eff_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
 };
 
 // ============================================================

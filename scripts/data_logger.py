@@ -17,7 +17,7 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseWithCovarianceStamped
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, Int32
 
 
 def quat_to_yaw(qz: float, qw: float) -> float:
@@ -43,6 +43,7 @@ class DataLogger(Node):
             'ekf_x', 'ekf_y', 'ekf_theta', 'ekf_cov_xx', 'ekf_cov_yy', 'ekf_cov_tt',
             'pf_x',  'pf_y',  'pf_theta',  'pf_cov_xx',  'pf_cov_yy',  'pf_cov_tt',
             'n_eff',
+            'lm_count', 'wall_count',
         ])
 
         self._odom  = None
@@ -50,6 +51,8 @@ class DataLogger(Node):
         self._ekf   = None
         self._pf    = None
         self._n_eff = float('nan')
+        self._lm_count   = 0
+        self._wall_count = 0
         self._t0    = None
 
         self.create_subscription(Odometry, '/odom', self._odom_cb, 10)
@@ -57,6 +60,8 @@ class DataLogger(Node):
         self.create_subscription(PoseWithCovarianceStamped, '/pose_ekf', self._ekf_cb, 10)
         self.create_subscription(PoseWithCovarianceStamped, '/pose_pf',  self._pf_cb,  10)
         self.create_subscription(Float64, '/n_eff', self._neff_cb, 10)
+        self.create_subscription(Int32, '/ekf_landmark_count', self._lm_count_cb, 10)
+        self.create_subscription(Int32, '/ekf_wall_count',     self._wall_count_cb, 10)
 
         self.create_timer(0.1, self._log_row)
         self.get_logger().info(f'DataLogger → {self._path}')
@@ -76,6 +81,8 @@ class DataLogger(Node):
     def _ekf_cb(self, msg): self._ekf = self._pose_cb(msg)
     def _pf_cb(self,  msg): self._pf  = self._pose_cb(msg)
     def _neff_cb(self, msg): self._n_eff = msg.data
+    def _lm_count_cb(self,   msg): self._lm_count   = msg.data
+    def _wall_count_cb(self, msg): self._wall_count = msg.data
 
     def _log_row(self):
         if self._odom is None:
@@ -98,6 +105,7 @@ class DataLogger(Node):
             *[f'{v:.5f}' for v in (self._ekf or empty)],
             *[f'{v:.5f}' for v in (self._pf  or empty)],
             f'{self._n_eff:.3f}',
+            f'{self._lm_count}', f'{self._wall_count}',
         ])
         self._file.flush()
 
