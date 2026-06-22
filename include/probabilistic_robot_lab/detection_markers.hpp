@@ -50,10 +50,16 @@ buildDetectionMarkers(double rx, double ry,
     };
 
     // ---- Landmarks: one sphere (always) + one line (hit only) per entry ----
+    // "hit" requires BOTH the landmark AND at least one wall to be detected:
+    // the combined anchor feature is what's unambiguous, not the pillar alone.
+    // Without the wall, we don't know which of the 9 pillars we're seeing.
+    const bool walls_present = !walls.empty();
     for (const auto& lm : LANDMARK_MAP) {
         bool hit = false;
-        for (const auto& d : detected) {
-            if (d.mx == lm.x && d.my == lm.y) { hit = true; break; }
+        if (walls_present) {
+            for (const auto& d : detected) {
+                if (d.mx == lm.x && d.my == lm.y) { hit = true; break; }
+            }
         }
 
         Marker s; makeHeader(s);
