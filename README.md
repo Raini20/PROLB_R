@@ -138,6 +138,9 @@ To change the route, edit `INITIAL_POSE` and `WAYPOINTS` in `scripts/auto_nav.py
 # Filter comparison only (trajectory, error, RMSE, covariance, N_eff):
 python3 scripts/plot_results.py ~/prob_ros_ws/logs/filter_data_with_resampling.csv
 
+# Q/R sensitivity study — grouped bar chart with ±1σ error bars (uses multi-run data):
+python3 scripts/plot_qr_study.py ~/prob_ros_ws/logs/multi_20260623_022008
+
 # Special Task — N_eff with vs. without resampling:
 python3 scripts/plot_n_eff.py \
     ~/prob_ros_ws/logs/filter_data_with_resampling.csv \

@@ -26,4 +26,5 @@ __pycache__/
 .vscode/
 .idea/
 *.swp
-*.swo
+*.swo*.zip
+*.csv
